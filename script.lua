@@ -301,7 +301,7 @@ function m:AddTestFavoriteSection(tab)
             Expanded = true,
         })
 
-        accordion:AddLabel("Dropdown di bawah ini hanya akan menampilkan pet yang berstatus Favorit di tas kamu.")
+        accordion:AddLabel("Dropdown di bawah ini HANYA akan menampilkan pet yang berstatus Favorit di TAS kamu.")
 
         accordion:AddSelectBox({
             Name = "Detected Favorite Pets",
@@ -310,32 +310,46 @@ function m:AddTestFavoriteSection(tab)
             MultiSelect = true,
             Flag = "TestFavoritePets",
             OnInit = function(api, optionsData)
-                -- PENGAMAN: Jika modul Pet belum siap, hentikan proses ini agar tidak crash!
+                -- PENGAMAN: Jika modul Pet belum siap, hentikan
                 if not Pet then 
                     optionsData.updateOptions({{text = "Menunggu Modul Pet...", value = "nil"}})
                     return 
                 end
 
-                local pets = Pet:GetAllMyPets()
                 local currentOptionsSet = {}
 
-                for _, pet in pairs(pets) do
-                    if pet.IsFavorited then
-                        table.insert(currentOptionsSet, {text = Pet:SerializePet(pet), value = pet.ID})
+                -- TARIK DATA LANGSUNG DARI ATRIBUT TAS (Akurasi 100%)
+                for _, tool in pairs(Pet:GetAllOwnedPets()) do
+                    local isFavorited = tool:GetAttribute("d") or false
+                    if isFavorited then
+                        local petID = tool:GetAttribute("PET_UUID")
+                        if petID then
+                            local petDetail = Pet:GetPetDetail(petID)
+                            if petDetail then
+                                table.insert(currentOptionsSet, {text = Pet:SerializePet(petDetail), value = petID})
+                            end
+                        end
                     end
                 end
                 optionsData.updateOptions(currentOptionsSet)
             end,
             OnDropdownOpen = function(currentOptions, updateOptions)
-                -- PENGAMAN: Jika modul Pet belum siap, hentikan proses ini agar tidak crash!
+                -- PENGAMAN: Jika modul Pet belum siap, hentikan
                 if not Pet then return end
 
-                local pets = Pet:GetAllMyPets()
                 local currentOptionsSet = {}
 
-                for _, pet in pairs(pets) do
-                    if pet.IsFavorited then
-                        table.insert(currentOptionsSet, {text = Pet:SerializePet(pet), value = pet.ID})
+                -- TARIK DATA LANGSUNG DARI ATRIBUT TAS (Akurasi 100%)
+                for _, tool in pairs(Pet:GetAllOwnedPets()) do
+                    local isFavorited = tool:GetAttribute("d") or false
+                    if isFavorited then
+                        local petID = tool:GetAttribute("PET_UUID")
+                        if petID then
+                            local petDetail = Pet:GetPetDetail(petID)
+                            if petDetail then
+                                table.insert(currentOptionsSet, {text = Pet:SerializePet(petDetail), value = petID})
+                            end
+                        end
                     end
                 end
                 updateOptions(currentOptionsSet)
@@ -350,15 +364,24 @@ function m:AddTestFavoriteSection(tab)
                     return 
                 end
                 
-                local pets = Pet:GetAllMyPets()
                 local count = 0
-                for _, pet in pairs(pets) do
-                    if pet.IsFavorited then
+                for _, tool in pairs(Pet:GetAllOwnedPets()) do
+                    local isFavorited = tool:GetAttribute("d") or false
+                    if isFavorited then
                         count = count + 1
-                        print("Detected Favorite: " .. (pet.Name or pet.Type) .. " (ID: " .. pet.ID .. ")")
+                        local petID = tool:GetAttribute("PET_UUID")
+                        local petDetail = Pet:GetPetDetail(petID)
+                        
+                        -- Mengambil nama atau tipe pet jika namanya kosong
+                        local petName = "Unknown"
+                        if petDetail then
+                            petName = petDetail.Name or petDetail.Type
+                        end
+                        
+                        print("Detected Favorite: " .. petName .. " (ID: " .. tostring(petID) .. ")")
                     end
                 end
-                print("Total Favorite Pets Found: " .. count)
+                print("Total Favorite Pets Found in Bag: " .. count)
             end
         })
     end
@@ -12959,7 +12982,7 @@ local configFolder = "EzHub/AfiHub"
 
 -- Initialize window
 local window = EzUI:CreateNew({
-    Title = "AfiHub 1.115",
+    Title = "AfiHub 1.116",
     Width = 700,
     Height = 400,
     Opacity = 0.9,
@@ -13011,7 +13034,7 @@ PlantModule:Init(window, CoreModule, PlayerModule, GardenModule)
 FarmUI:init(window, PlayerModule, GardenModule, PlantModule)
 
 -- Feature
-FeatureUI:Init(Window, Core, PetModule)
+FeatureUI:Init(window, CoreModule, PetModule)
 
 -- Automation
 CraftingModule:Init(window, CoreModule, PlantModule)
