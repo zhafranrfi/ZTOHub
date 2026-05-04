@@ -294,7 +294,7 @@ EmbeddedModules["feature/ui.lua"] = function()
         self:AddTestFavoriteSection(tab)
     end
 
-    function m:AddTestFavoriteSection(tab)
+function m:AddTestFavoriteSection(tab)
         local accordion = tab:AddAccordion({
             Title = "Favorite Detection Test",
             Icon = "🔍",
@@ -303,7 +303,6 @@ EmbeddedModules["feature/ui.lua"] = function()
 
         accordion:AddLabel("Dropdown di bawah ini hanya akan menampilkan pet yang berstatus Favorit di tas kamu.")
 
-        -- Dropdown untuk mendeteksi pet favorit
         accordion:AddSelectBox({
             Name = "Detected Favorite Pets",
             Options = {"Loading..."},
@@ -311,12 +310,16 @@ EmbeddedModules["feature/ui.lua"] = function()
             MultiSelect = true,
             Flag = "TestFavoritePets",
             OnInit = function(api, optionsData)
-                -- Fungsi ini berjalan saat UI pertama kali dimuat
+                -- PENGAMAN: Jika modul Pet belum siap, hentikan proses ini agar tidak crash!
+                if not Pet then 
+                    optionsData.updateOptions({{text = "Menunggu Modul Pet...", value = "nil"}})
+                    return 
+                end
+
                 local pets = Pet:GetAllMyPets()
                 local currentOptionsSet = {}
 
                 for _, pet in pairs(pets) do
-                    -- Filter: HANYA masukkan ke dropdown jika IsFavorited bernilai true
                     if pet.IsFavorited then
                         table.insert(currentOptionsSet, {text = Pet:SerializePet(pet), value = pet.ID})
                     end
@@ -324,12 +327,13 @@ EmbeddedModules["feature/ui.lua"] = function()
                 optionsData.updateOptions(currentOptionsSet)
             end,
             OnDropdownOpen = function(currentOptions, updateOptions)
-                -- Fungsi ini berjalan setiap kali kamu mengklik/membuka dropdown
+                -- PENGAMAN: Jika modul Pet belum siap, hentikan proses ini agar tidak crash!
+                if not Pet then return end
+
                 local pets = Pet:GetAllMyPets()
                 local currentOptionsSet = {}
 
                 for _, pet in pairs(pets) do
-                    -- Filter: HANYA masukkan ke dropdown jika IsFavorited bernilai true
                     if pet.IsFavorited then
                         table.insert(currentOptionsSet, {text = Pet:SerializePet(pet), value = pet.ID})
                     end
@@ -341,6 +345,11 @@ EmbeddedModules["feature/ui.lua"] = function()
         accordion:AddButton({
             Text = "Print Total Favorites to Console (F9)",
             Callback = function()
+                if not Pet then 
+                    print("Error: Modul Pet belum terhubung!")
+                    return 
+                end
+                
                 local pets = Pet:GetAllMyPets()
                 local count = 0
                 for _, pet in pairs(pets) do
@@ -353,7 +362,7 @@ EmbeddedModules["feature/ui.lua"] = function()
             end
         })
     end
-
+    
     return m
 end
 
@@ -12898,6 +12907,17 @@ local Discord = loadModule("../module/discord.lua")
 local ServerUI = loadModule("server/ui.lua")
 local Rarity = loadModule("rarity.lua")
 
+-- Inventory modules
+local InventoryModule = loadModule("inventory/inventory.lua")
+local InventoryUI = loadModule("inventory/ui.lua")
+
+-- -- Pet modules
+local PetTeamModule = loadModule("pet/team.lua")
+local PetWebhook = loadModule("pet/webhook.lua")
+local EggModule = loadModule("pet/egg.lua")
+local PetModule = loadModule("pet/pet.lua")
+local PetUI = loadModule("pet/ui.lua")
+
 -- Farm modules
 local GardenModule = loadModule("farm/garden.lua")
 local PlantModule = loadModule("farm/plant.lua")
@@ -12921,21 +12941,11 @@ local ShopPremiumModule = loadModule("shop/premium.lua")
 local ShopCosmeticModule = loadModule("shop/cosmetic.lua")
 local ShopUI = loadModule("shop/ui.lua")
 
--- -- Pet modules
-local PetTeamModule = loadModule("pet/team.lua")
-local PetWebhook = loadModule("pet/webhook.lua")
-local EggModule = loadModule("pet/egg.lua")
-local PetModule = loadModule("pet/pet.lua")
-local PetUI = loadModule("pet/ui.lua")
-
 -- Automation modules
 local CraftingModule = loadModule("auto/crafting.lua")
 local CookingModule = loadModule("auto/cooking.lua")
 local AutoUI = loadModule("auto/ui.lua")
 
--- Inventory modules
-local InventoryModule = loadModule("inventory/inventory.lua")
-local InventoryUI = loadModule("inventory/ui.lua")
 
 -- Event modules
 local GhoulQuest = loadModule("event/ghoul/quest.lua")
@@ -12949,7 +12959,7 @@ local configFolder = "EzHub/AfiHub"
 
 -- Initialize window
 local window = EzUI:CreateNew({
-    Title = "AfiHub 1.114",
+    Title = "AfiHub 1.115",
     Width = 700,
     Height = 400,
     Opacity = 0.9,
@@ -12984,14 +12994,9 @@ task.wait(1) -- Ensure config is loaded
 -- Player
 PlayerModule:Init(CoreModule)
 
--- Farm
-GardenModule:Init(window, CoreModule, PlayerModule)
-PlantModule:Init(window, CoreModule, PlayerModule, GardenModule)
-FarmUI:init(window, PlayerModule, GardenModule, PlantModule)
-
--- Feature
-
-FeatureUI:Init(Window, Core, PetModule)
+-- Inventory
+InventoryModule:Init(CoreModule, PlayerModule, window)
+InventoryUI:Init(window, InventoryModule, PetModule)
 
 -- -- Pet
 PetTeamModule:Init(CoreModule, PlayerModule, window, petTeamsConfig, GardenModule)
@@ -12999,6 +13004,14 @@ PetWebhook:Init(window, CoreModule, Discord)
 PetModule:Init(CoreModule, PlayerModule, window, GardenModule, PetTeamModule, PetWebhook)
 EggModule:Init(CoreModule, PlayerModule, window, GardenModule, PetModule, PetWebhook)
 PetUI:Init(window, PetTeamModule, EggModule, PetModule, GardenModule, PlayerModule)
+
+-- Farm
+GardenModule:Init(window, CoreModule, PlayerModule)
+PlantModule:Init(window, CoreModule, PlayerModule, GardenModule)
+FarmUI:init(window, PlayerModule, GardenModule, PlantModule)
+
+-- Feature
+FeatureUI:Init(Window, Core, PetModule)
 
 -- Automation
 CraftingModule:Init(window, CoreModule, PlantModule)
@@ -13020,9 +13033,6 @@ AscensionModule:Init(window, CoreModule, PlantModule, PlayerModule)
 SeasonPassModule:Init(window, CoreModule)
 QuestUI:Init(window, CoreModule, AscensionModule)
 
--- Inventory
-InventoryModule:Init(CoreModule, PlayerModule, window)
-InventoryUI:Init(window, InventoryModule, PetModule)
 
 -- Event
 GhoulQuest:Init(window, CoreModule)
