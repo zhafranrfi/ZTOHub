@@ -291,7 +291,7 @@ EmbeddedModules["feature/ui.lua"] = function()
 
         self:AddTestFavoriteSection(tab)
         self:AddPetTeamsManagementSection(tab)
-        self:AddAdvancedTeamLevelingSection(tab) -- Fitur Baru
+        self:AddAdvancedTeamLevelingSection(tab)
     end
 
     -- FUNGSI BERSAMA: Memindai dan mendapatkan data pet favorit (Akurat 100%)
@@ -348,25 +348,6 @@ EmbeddedModules["feature/ui.lua"] = function()
         return currentOptionsSet
     end
 
-    -- FUNGSI BERSAMA: Mendapatkan daftar Tipe Pet untuk Target Leveling
-    function m:GetUniquePetTypes()
-        local types = {}
-        local uniqueCheck = {}
-        if not Pet then return types end
-
-        for _, tool in pairs(Pet:GetAllOwnedPets()) do
-            local petID = tool:GetAttribute("PET_UUID")
-            if petID then
-                local detail = Pet:GetPetDetail(petID)
-                if detail and detail.Type and not uniqueCheck[detail.Type] then
-                    uniqueCheck[detail.Type] = true
-                    table.insert(types, {text = detail.Type, value = detail.Type})
-                end
-            end
-        end
-        return types
-    end
-
     function m:AddTestFavoriteSection(tab)
         local accordion = tab:AddAccordion({ Title = "Favorite Detection Test", Icon = "🔍", Expanded = false })
         accordion:AddLabel("Dropdown ini menampilkan SEMUA pet favorit (di Tas & Garden).")
@@ -378,6 +359,23 @@ EmbeddedModules["feature/ui.lua"] = function()
             Flag = "TestFavoritePets",
             OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(self:ScanAndGetFavorites()) end end,
             OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(self:ScanAndGetFavorites()) end end
+        })
+        
+        -- Tombol Print 
+        accordion:AddButton({
+            Text = "Print Total Favorites to Console (F9)",
+            Callback = function()
+                if not Pet then 
+                    print("Error: Modul Pet belum terhubung!")
+                    return 
+                end
+                
+                local results = self:ScanAndGetFavorites()
+                for _, data in ipairs(results) do
+                    print("Detected Favorite: " .. data.text .. " (ID: " .. data.value .. ")")
+                end
+                print("Total Favorite Pets Found (Memory + Garden + Bag): " .. #results)
+            end
         })
     end
 
@@ -407,8 +405,8 @@ EmbeddedModules["feature/ui.lua"] = function()
         })
     end
 
--- ================================================================= --
-    -- FITUR BARU: AUTO TEAM + AUTO LEVELING (REVISI FINAL)
+    -- ================================================================= --
+    -- FITUR BARU: AUTO TEAM + AUTO LEVELING
     -- ================================================================= --
     function m:AddAdvancedTeamLevelingSection(tab)
         local accordion = tab:AddAccordion({
@@ -449,7 +447,6 @@ EmbeddedModules["feature/ui.lua"] = function()
             OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(self:ScanAndGetFavorites()) end end
         })
 
-        -- SISTEM PENARIKAN DATA LAMA DIKEMBALIKAN: Menampilkan seluruh pet di tas
         accordion:AddSelectBox({
             Name = "Target Pet Leveling",
             Options = {"Loading..."},
@@ -498,7 +495,7 @@ EmbeddedModules["feature/ui.lua"] = function()
                     task.spawn(function()
                         while m.AdvLevelingLoopActive do
                             self:ProcessAdvancedLeveling()
-                            task.wait(2) -- Loop setiap 2 detik
+                            task.wait(2)
                         end
                     end)
                 end
@@ -506,7 +503,6 @@ EmbeddedModules["feature/ui.lua"] = function()
         })
     end
 
-    -- LOGIKA UTAMA ADVANCED LEVELING (MENGGUNAKAN SISTEM LAMA) --
     function m:ProcessAdvancedLeveling()
         if not Pet then return end
         if Pet:GetCurrentPetTeam() ~= "core" then return end
@@ -530,7 +526,6 @@ EmbeddedModules["feature/ui.lua"] = function()
         local currentLevelingCount = 0
         local unequippedAny = false
 
-        -- TAHAP 1: BERSIH-BERSIH GARDEN
         for petID, _ in pairs(activePets) do
             local detail = Pet:GetPetDetail(petID)
             if not detail then continue end
@@ -560,7 +555,6 @@ EmbeddedModules["feature/ui.lua"] = function()
             activePets = Pet:GetAllActivePets() or {} 
         end
 
-        -- TAHAP 2: EQUIP CORE TEAM
         for _, petID in ipairs(coreTeam) do
             if not activePets[petID] then
                 Pet:EquipPet(petID)
@@ -569,7 +563,6 @@ EmbeddedModules["feature/ui.lua"] = function()
             end
         end
 
-        -- TAHAP 3: EQUIP PET LEVELING (PERSIS SEPERTI SCRIPT PERTAMA KITA)
         if currentLevelingCount < maxTarget then
             local slotsAvailable = maxTarget - currentLevelingCount
             local equipCount = 0
@@ -577,7 +570,6 @@ EmbeddedModules["feature/ui.lua"] = function()
             for _, tool in pairs(Pet:GetAllOwnedPets()) do
                 if equipCount >= slotsAvailable then break end
                 
-                -- Cek atribut "d" agar pet favorit tidak tertukar
                 local isFavorited = tool:GetAttribute("d") or false
                 if isFavorited then continue end
 
@@ -587,7 +579,6 @@ EmbeddedModules["feature/ui.lua"] = function()
                 local detail = Pet:GetPetDetail(petID)
                 if not detail or detail.Age >= targetLevel then continue end
 
-                -- Pencocokan tipe dan ID seperti script terdahulu
                 local isMatch = false
                 for _, selected in ipairs(targetPets) do
                     if detail.Type == selected or petID == selected then
@@ -606,8 +597,6 @@ EmbeddedModules["feature/ui.lua"] = function()
         end
     end
 
-    return m
-end
     return m
 end
 
