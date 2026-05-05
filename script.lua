@@ -407,8 +407,8 @@ EmbeddedModules["feature/ui.lua"] = function()
         })
     end
 
-    -- ================================================================= --
-    -- FITUR BARU: AUTO TEAM + AUTO LEVELING
+-- ================================================================= --
+    -- FITUR BARU: AUTO TEAM + AUTO LEVELING (REVISI FINAL)
     -- ================================================================= --
     function m:AddAdvancedTeamLevelingSection(tab)
         local accordion = tab:AddAccordion({
@@ -417,7 +417,76 @@ EmbeddedModules["feature/ui.lua"] = function()
             Expanded = true,
         })
 
-        accordion:AddLabel("⚠️ WARNING: Matikan Auto Leveling lama di tab Pet sebelum menggunakan ini agar tidak bentrok!")
+        accordion:AddLabel("⚠️ WARNING: Matikan Auto Leveling lama di tab Pet terlebih dahulu!")
+        
+        accordion:AddLabel("--- 1. Konfigurasi Leveling ---")
+
+        accordion:AddSlider({
+            Name = "Target Level Maksimal",
+            Value = 100,
+            Min = 1,
+            Max = 100,
+            Flag = "FeatureAdvTargetLevel"
+        })
+
+        accordion:AddSlider({
+            Name = "Maksimal Pet Leveling (Tumbal) di Garden",
+            Value = 1,
+            Min = 1,
+            Max = 15,
+            Flag = "FeatureAdvMaxSlots"
+        })
+
+        accordion:AddLabel("--- 2. Pemilihan Tim ---")
+
+        accordion:AddSelectBox({
+            Name = "Core Team (Pet Favorit Wajib)",
+            Options = {"Loading..."},
+            Placeholder = "Pilih pet favorit yang akan dijaga di garden...",
+            MultiSelect = true,
+            Flag = "FeatureAdvCoreTeam",
+            OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(self:ScanAndGetFavorites()) end end,
+            OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(self:ScanAndGetFavorites()) end end
+        })
+
+        -- SISTEM PENARIKAN DATA LAMA DIKEMBALIKAN: Menampilkan seluruh pet di tas
+        accordion:AddSelectBox({
+            Name = "Target Pet Leveling",
+            Options = {"Loading..."},
+            Placeholder = "Pilih pet yang akan dinaikkan levelnya...",
+            MultiSelect = true,
+            Flag = "FeatureAdvTargetPets",
+            OnInit = function(api, optionsData)
+                if not Pet then return end
+                local opts = {}
+                for _, tool in pairs(Pet:GetAllOwnedPets()) do
+                    local petID = tool:GetAttribute("PET_UUID")
+                    if petID then
+                        local detail = Pet:GetPetDetail(petID)
+                        if detail then
+                            table.insert(opts, {text = Pet:SerializePet(detail), value = petID})
+                        end
+                    end
+                end
+                optionsData.updateOptions(opts)
+            end,
+            OnDropdownOpen = function(currentOptions, updateOptions)
+                if not Pet then return end
+                local opts = {}
+                for _, tool in pairs(Pet:GetAllOwnedPets()) do
+                    local petID = tool:GetAttribute("PET_UUID")
+                    if petID then
+                        local detail = Pet:GetPetDetail(petID)
+                        if detail then
+                            table.insert(opts, {text = Pet:SerializePet(detail), value = petID})
+                        end
+                    end
+                end
+                updateOptions(opts)
+            end
+        })
+
+        accordion:AddLabel("--- 3. Eksekusi ---")
 
         accordion:AddToggle({
             Name = "Enable Auto Team + Leveling",
@@ -435,80 +504,43 @@ EmbeddedModules["feature/ui.lua"] = function()
                 end
             end
         })
-
-        accordion:AddSelectBox({
-            Name = "1. Select Core Team (Favorites)",
-            Options = {"Loading..."},
-            Placeholder = "Select pets that must stay equipped...",
-            MultiSelect = true,
-            Flag = "FeatureAdvCoreTeam",
-            OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(self:ScanAndGetFavorites()) end end,
-            OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(self:ScanAndGetFavorites()) end end
-        })
-
-        accordion:AddSelectBox({
-            Name = "2. Target Pets to Level Up",
-            Options = {"Loading..."},
-            Placeholder = "Select pet types to level up...",
-            MultiSelect = true,
-            Flag = "FeatureAdvTargetPets",
-            OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(self:GetUniquePetTypes()) end end,
-            OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(self:GetUniquePetTypes()) end end
-        })
-
-        accordion:AddSlider({
-            Name = "3. Max Target Level",
-            Value = 100,
-            Min = 1,
-            Max = 100,
-            Flag = "FeatureAdvTargetLevel"
-        })
-
-        accordion:AddSlider({
-            Name = "4. Max Leveling Pet Slots",
-            Value = 1,
-            Min = 1,
-            Max = 15,
-            Flag = "FeatureAdvMaxSlots"
-        })
     end
 
-    -- LOGIKA UTAMA ADVANCED LEVELING --
+    -- LOGIKA UTAMA ADVANCED LEVELING (MENGGUNAKAN SISTEM LAMA) --
     function m:ProcessAdvancedLeveling()
         if not Pet then return end
-        if Pet:GetCurrentPetTeam() ~= "core" then return end -- Tunggu sampai keadaan garden normal (bukan pas mode shop)
+        if Pet:GetCurrentPetTeam() ~= "core" then return end
 
         local coreTeam = Window:GetConfigValue("FeatureAdvCoreTeam") or {}
-        local targetTypes = Window:GetConfigValue("FeatureAdvTargetPets") or {}
+        local targetPets = Window:GetConfigValue("FeatureAdvTargetPets") or {}
         local targetLevel = Window:GetConfigValue("FeatureAdvTargetLevel") or 100
         local maxTarget = Window:GetConfigValue("FeatureAdvMaxSlots") or 1
 
-        -- Buat lookup tabel agar gampang ngecek Core Team
         local coreTeamLookup = {}
         for _, id in ipairs(coreTeam) do
             coreTeamLookup[id] = true
+        end
+
+        local targetLookup = {}
+        for _, sel in ipairs(targetPets) do
+            targetLookup[sel] = true
         end
 
         local activePets = Pet:GetAllActivePets() or {}
         local currentLevelingCount = 0
         local unequippedAny = false
 
-        -- TAHAP 1: BERSIH-BERSIH (Unequip yang tidak sesuai)
+        -- TAHAP 1: BERSIH-BERSIH GARDEN
         for petID, _ in pairs(activePets) do
             local detail = Pet:GetPetDetail(petID)
             if not detail then continue end
 
             local isCore = coreTeamLookup[petID]
-            local isTargetType = false
-            for _, tType in ipairs(targetTypes) do
-                if detail.Type == tType then isTargetType = true; break end
-            end
+            local isTarget = targetLookup[petID] or targetLookup[detail.Type]
 
             if isCore then
-                -- Ini Core Team, biarkan saja.
                 continue
-            elseif isTargetType then
-                -- Ini Pet Leveling. Tarik jika sudah max level!
+            elseif isTarget then
                 if detail.Age >= targetLevel then
                     Pet:UnequipPet(petID)
                     unequippedAny = true
@@ -517,7 +549,6 @@ EmbeddedModules["feature/ui.lua"] = function()
                     currentLevelingCount = currentLevelingCount + 1
                 end
             else
-                -- BUKAN Core Team dan BUKAN Pet Leveling (Atau ada pet nyasar). TARIK PAKSA!
                 Pet:UnequipPet(petID)
                 unequippedAny = true
                 task.wait(0.4)
@@ -525,20 +556,20 @@ EmbeddedModules["feature/ui.lua"] = function()
         end
 
         if unequippedAny then
-            task.wait(1.5) -- Tunggu animasi & server
-            activePets = Pet:GetAllActivePets() or {} -- Refresh data setelah ditarik
+            task.wait(1.5)
+            activePets = Pet:GetAllActivePets() or {} 
         end
 
         -- TAHAP 2: EQUIP CORE TEAM
         for _, petID in ipairs(coreTeam) do
             if not activePets[petID] then
                 Pet:EquipPet(petID)
-                activePets[petID] = true -- Tandai aktif sementara agar tidak double equip
+                activePets[petID] = true
                 task.wait(0.4)
             end
         end
 
-        -- TAHAP 3: EQUIP PET LEVELING
+        -- TAHAP 3: EQUIP PET LEVELING (PERSIS SEPERTI SCRIPT PERTAMA KITA)
         if currentLevelingCount < maxTarget then
             local slotsAvailable = maxTarget - currentLevelingCount
             local equipCount = 0
@@ -546,24 +577,28 @@ EmbeddedModules["feature/ui.lua"] = function()
             for _, tool in pairs(Pet:GetAllOwnedPets()) do
                 if equipCount >= slotsAvailable then break end
                 
+                -- Cek atribut "d" agar pet favorit tidak tertukar
+                local isFavorited = tool:GetAttribute("d") or false
+                if isFavorited then continue end
+
                 local petID = tool:GetAttribute("PET_UUID")
                 if not petID or activePets[petID] then continue end
-
-                -- CEK KEAMANAN: Jangan gunakan pet favorit sebagai tumbal leveling!
-                if tool:GetAttribute("d") or m.FavoriteMemory[petID] then continue end
 
                 local detail = Pet:GetPetDetail(petID)
                 if not detail or detail.Age >= targetLevel then continue end
 
-                -- Cek apakah tipe pet ini sesuai dengan target leveling
+                -- Pencocokan tipe dan ID seperti script terdahulu
                 local isMatch = false
-                for _, tType in ipairs(targetTypes) do
-                    if detail.Type == tType then isMatch = true; break end
+                for _, selected in ipairs(targetPets) do
+                    if detail.Type == selected or petID == selected then
+                        isMatch = true
+                        break
+                    end
                 end
 
                 if isMatch then
                     Pet:EquipPet(petID)
-                    activePets[petID] = true -- Tandai
+                    activePets[petID] = true
                     equipCount = equipCount + 1
                     task.wait(0.4)
                 end
@@ -571,6 +606,8 @@ EmbeddedModules["feature/ui.lua"] = function()
         end
     end
 
+    return m
+end
     return m
 end
 
@@ -13167,7 +13204,7 @@ local configFolder = "EzHub/AfiHub"
 
 -- Initialize window
 local window = EzUI:CreateNew({
-    Title = "AfiHub 1.118",
+    Title = "AfiHub 1.119",
     Width = 700,
     Height = 400,
     Opacity = 0.9,
