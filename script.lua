@@ -272,9 +272,8 @@ EmbeddedModules["feature/ui.lua"] = function()
     
     local Window
     local Core
-    local Pet -- Menambahkan variabel Pet untuk mengakses data pet
+    local Pet
 
-    -- Jangan lupa tambahkan _pet di parameter Init
     function m:Init(_window, _core, _pet)
         Window = _window
         Core = _core
@@ -289,86 +288,87 @@ EmbeddedModules["feature/ui.lua"] = function()
             Icon = "✨",
         })
 
+        -- Menambahkan kedua section secara berurutan
         self:AddTestFavoriteSection(tab)
+        self:AddPetTeamsManagementSection(tab)
     end
 
-function m:AddTestFavoriteSection(tab)
+    -- FUNGSI BERSAMA: Memindai dan mendapatkan data pet favorit (Akurat 100%)
+    function m:ScanAndGetFavorites()
+        m.FavoriteMemory = m.FavoriteMemory or {}
+        local currentOptionsSet = {}
+        if not Pet then return currentOptionsSet end
+
+        -- 1. Scan Inventory (Sumber paling akurat, update memori)
+        for _, tool in pairs(Pet:GetAllOwnedPets()) do
+            local petID = tool:GetAttribute("PET_UUID")
+            if petID then
+                if tool:GetAttribute("d") then
+                    m.FavoriteMemory[petID] = true -- Simpan ke memori permanen
+                else
+                    m.FavoriteMemory[petID] = nil -- Hapus dari memori jika bintang dicabut
+                end
+            end
+        end
+
+        -- 2. Kumpulkan semua pet (Tas + Garden)
+        local addedIDs = {}
+        for _, pet in pairs(Pet:GetAllMyPets()) do
+            local petID = pet.ID
+            if addedIDs[petID] then continue end
+
+            -- Cek dari data normal atau memori script
+            local isFav = pet.IsFavorited or m.FavoriteMemory[petID]
+
+            -- 3. Penggalian Agresif (Aggressive Digging) ke Data Mentah Server
+            if not isFav then
+                local rawData = Pet:GetPetData(petID)
+                if rawData then
+                    if rawData.d or rawData.IsFavorited or rawData.Favorited then
+                        isFav = true
+                    elseif rawData.PetData and (rawData.PetData.d or rawData.PetData.Favorited) then
+                        isFav = true
+                    end
+                end
+            end
+
+            -- 4. Cek Fisik Model di Garden (Proteksi lapis terakhir)
+            if not isFav then
+                local physicalModel = Pet:GetModelPet(petID)
+                if physicalModel and (physicalModel:GetAttribute("d") or physicalModel:GetAttribute("IsFavorited")) then
+                    isFav = true
+                end
+            end
+
+            -- Jika terbukti favorit dari salah satu lapis pengecekan di atas
+            if isFav then
+                m.FavoriteMemory[petID] = true -- Catat ke memori agar tidak hilang saat di garden
+                addedIDs[petID] = true
+                table.insert(currentOptionsSet, {
+                    text = Pet:SerializePet(pet), 
+                    value = petID,
+                    weight = tonumber(pet.BaseWeight) or 0
+                })
+            end
+        end
+
+        -- Sorting dari terberat
+        table.sort(currentOptionsSet, function(a, b)
+            return a.weight > b.weight
+        end)
+
+        return currentOptionsSet
+    end
+
+    function m:AddTestFavoriteSection(tab)
         local accordion = tab:AddAccordion({
             Title = "Favorite Detection Test",
             Icon = "🔍",
-            Expanded = true,
+            Expanded = false, -- Saya set false agar tidak terlalu panjang saat membuka tab
         })
 
         accordion:AddLabel("Dropdown ini menampilkan SEMUA pet favorit (di Tas & Garden).")
         accordion:AddLabel("TIPS: Jika pet di garden belum terdeteksi, masukkan ke tas SEBENTAR lalu keluarkan lagi agar script mencatatnya di memori permanen.")
-
-        -- Sistem Memori Permanen di level modul
-        m.FavoriteMemory = m.FavoriteMemory or {}
-
-        local function scanAndGetFavorites()
-            local currentOptionsSet = {}
-            if not Pet then return currentOptionsSet end
-
-            -- 1. Scan Inventory (Sumber paling akurat, update memori)
-            for _, tool in pairs(Pet:GetAllOwnedPets()) do
-                local petID = tool:GetAttribute("PET_UUID")
-                if petID then
-                    if tool:GetAttribute("d") then
-                        m.FavoriteMemory[petID] = true -- Simpan ke memori permanen
-                    else
-                        m.FavoriteMemory[petID] = nil -- Hapus dari memori jika bintang dicabut
-                    end
-                end
-            end
-
-            -- 2. Kumpulkan semua pet (Tas + Garden)
-            local addedIDs = {}
-            for _, pet in pairs(Pet:GetAllMyPets()) do
-                local petID = pet.ID
-                if addedIDs[petID] then continue end
-
-                -- Cek dari data normal atau memori script
-                local isFav = pet.IsFavorited or m.FavoriteMemory[petID]
-
-                -- 3. Penggalian Agresif (Aggressive Digging) ke Data Mentah Server
-                if not isFav then
-                    local rawData = Pet:GetPetData(petID)
-                    if rawData then
-                        if rawData.d or rawData.IsFavorited or rawData.Favorited then
-                            isFav = true
-                        elseif rawData.PetData and (rawData.PetData.d or rawData.PetData.Favorited) then
-                            isFav = true
-                        end
-                    end
-                end
-
-                -- 4. Cek Fisik Model di Garden (Proteksi lapis terakhir)
-                if not isFav then
-                    local physicalModel = Pet:GetModelPet(petID)
-                    if physicalModel and (physicalModel:GetAttribute("d") or physicalModel:GetAttribute("IsFavorited")) then
-                        isFav = true
-                    end
-                end
-
-                -- Jika terbukti favorit dari salah satu lapis pengecekan di atas
-                if isFav then
-                    m.FavoriteMemory[petID] = true -- Catat ke memori agar tidak hilang saat di garden
-                    addedIDs[petID] = true
-                    table.insert(currentOptionsSet, {
-                        text = Pet:SerializePet(pet), 
-                        value = petID,
-                        weight = tonumber(pet.BaseWeight) or 0
-                    })
-                end
-            end
-
-            -- Sorting dari terberat
-            table.sort(currentOptionsSet, function(a, b)
-                return a.weight > b.weight
-            end)
-
-            return currentOptionsSet
-        end
 
         accordion:AddSelectBox({
             Name = "Detected Favorite Pets",
@@ -381,11 +381,11 @@ function m:AddTestFavoriteSection(tab)
                     optionsData.updateOptions({{text = "Menunggu Modul Pet...", value = "nil"}})
                     return 
                 end
-                optionsData.updateOptions(scanAndGetFavorites())
+                optionsData.updateOptions(self:ScanAndGetFavorites())
             end,
             OnDropdownOpen = function(currentOptions, updateOptions)
                 if not Pet then return end
-                updateOptions(scanAndGetFavorites())
+                updateOptions(self:ScanAndGetFavorites())
             end
         })
 
@@ -397,7 +397,7 @@ function m:AddTestFavoriteSection(tab)
                     return 
                 end
                 
-                local results = scanAndGetFavorites()
+                local results = self:ScanAndGetFavorites()
                 for _, data in ipairs(results) do
                     print("Detected Favorite: " .. data.text .. " (ID: " .. data.value .. ")")
                 end
@@ -405,7 +405,81 @@ function m:AddTestFavoriteSection(tab)
             end
         })
     end
-    
+
+    function m:AddPetTeamsManagementSection(tab)
+        local accordion = tab:AddAccordion({
+            Title = "Pet Teams Management",
+            Icon = "🛠️",
+            Expanded = true,
+        })
+
+        accordion:AddLabel("Pilih pet favoritmu untuk dijadikan tim. Saat tombol ditekan, script akan menarik semua pet di garden lalu meletakkan tim yang dipilih.")
+
+        -- Dropdown menggunakan sumber data yang sama dengan deteksi favorit
+        accordion:AddSelectBox({
+            Name = "Select Team (Favorites Only)",
+            Options = {"Loading..."},
+            Placeholder = "Select pets to deploy...",
+            MultiSelect = true,
+            Flag = "FeatureDeployTeam",
+            OnInit = function(api, optionsData)
+                if not Pet then 
+                    optionsData.updateOptions({{text = "Menunggu Modul Pet...", value = "nil"}})
+                    return 
+                end
+                optionsData.updateOptions(self:ScanAndGetFavorites())
+            end,
+            OnDropdownOpen = function(currentOptions, updateOptions)
+                if not Pet then return end
+                updateOptions(self:ScanAndGetFavorites())
+            end
+        })
+
+        accordion:AddButton({
+            Text = "Deploy Selected Team 🚀",
+            Variant = "primary",
+            Callback = function()
+                if not Pet then 
+                    print("Error: Modul Pet belum terhubung!")
+                    return 
+                end
+
+                local selectedPets = Window:GetConfigValue("FeatureDeployTeam") or {}
+                if #selectedPets == 0 then
+                    print("Pilih minimal 1 pet untuk di-deploy!")
+                    return
+                end
+
+                -- 1. Tarik (Unequip) semua pet yang sedang aktif di garden
+                local activePets = Pet:GetAllActivePets() or {}
+                local unequippedAny = false
+                
+                for petID, _ in pairs(activePets) do
+                    Pet:UnequipPet(petID)
+                    unequippedAny = true
+                    task.wait(0.25) -- Jeda agar tidak spam server
+                end
+
+                if unequippedAny then
+                    task.wait(1.5) -- Tunggu animasi & proses server selesai
+                end
+
+                -- Pastikan tidak sedang terganti ke tim shop/sell
+                while Pet:GetCurrentPetTeam() ~= "core" do
+                    task.wait(1)
+                end
+
+                -- 2. Letakkan (Equip) pet yang dipilih di dropdown
+                for _, petID in ipairs(selectedPets) do
+                    Pet:EquipPet(petID)
+                    task.wait(0.5) -- Jeda aman antar penempatan
+                end
+                
+                print("✅ Deployment Tim Selesai!")
+            end
+        })
+    end
+
     return m
 end
 
@@ -13002,7 +13076,7 @@ local configFolder = "EzHub/AfiHub"
 
 -- Initialize window
 local window = EzUI:CreateNew({
-    Title = "AfiHub 1.116",
+    Title = "AfiHub 1.117",
     Width = 700,
     Height = 400,
     Opacity = 0.9,
