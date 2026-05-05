@@ -299,7 +299,7 @@ function m:AddTestFavoriteSection(tab)
             Expanded = true,
         })
 
-        accordion:AddLabel("Dropdown di bawah ini HANYA akan menampilkan pet yang berstatus Favorit di TAS kamu (Diurutkan dari terberat).")
+        accordion:AddLabel("Dropdown ini menampilkan SEMUA pet berstatus Favorit (baik di Tas maupun di Garden), diurutkan dari yang terberat.")
 
         accordion:AddSelectBox({
             Name = "Detected Favorite Pets",
@@ -308,30 +308,31 @@ function m:AddTestFavoriteSection(tab)
             MultiSelect = true,
             Flag = "TestFavoritePets",
             OnInit = function(api, optionsData)
-                -- PENGAMAN: Jika modul Pet belum siap, hentikan
                 if not Pet then 
                     optionsData.updateOptions({{text = "Menunggu Modul Pet...", value = "nil"}})
                     return 
                 end
 
                 local currentOptionsSet = {}
-
-                -- TARIK DATA LANGSUNG DARI ATRIBUT TAS (Akurasi 100%)
+                
+                -- 1. Kumpulkan ID pet favorit yang ada di Tas (Akurasi mutlak)
+                local inventoryFavorites = {}
                 for _, tool in pairs(Pet:GetAllOwnedPets()) do
-                    local isFavorited = tool:GetAttribute("d") or false
-                    if isFavorited then
-                        local petID = tool:GetAttribute("PET_UUID")
-                        if petID then
-                            local petDetail = Pet:GetPetDetail(petID)
-                            if petDetail then
-                                -- Kita selipkan data 'weight' untuk keperluan sorting
-                                table.insert(currentOptionsSet, {
-                                    text = Pet:SerializePet(petDetail), 
-                                    value = petID,
-                                    weight = tonumber(petDetail.BaseWeight) or 0
-                                })
-                            end
-                        end
+                    if tool:GetAttribute("d") then
+                        local id = tool:GetAttribute("PET_UUID")
+                        if id then inventoryFavorites[id] = true end
+                    end
+                end
+
+                -- 2. Tarik SEMUA pet (di tas + di garden)
+                for _, pet in pairs(Pet:GetAllMyPets()) do
+                    -- Jika pet ini favorit di server ATAU terdeteksi favorit di tas
+                    if pet.IsFavorited or inventoryFavorites[pet.ID] then
+                        table.insert(currentOptionsSet, {
+                            text = Pet:SerializePet(pet), 
+                            value = pet.ID,
+                            weight = tonumber(pet.BaseWeight) or 0
+                        })
                     end
                 end
                 
@@ -343,27 +344,27 @@ function m:AddTestFavoriteSection(tab)
                 optionsData.updateOptions(currentOptionsSet)
             end,
             OnDropdownOpen = function(currentOptions, updateOptions)
-                -- PENGAMAN: Jika modul Pet belum siap, hentikan
                 if not Pet then return end
 
                 local currentOptionsSet = {}
-
-                -- TARIK DATA LANGSUNG DARI ATRIBUT TAS (Akurasi 100%)
+                
+                -- 1. Kumpulkan ID pet favorit yang ada di Tas
+                local inventoryFavorites = {}
                 for _, tool in pairs(Pet:GetAllOwnedPets()) do
-                    local isFavorited = tool:GetAttribute("d") or false
-                    if isFavorited then
-                        local petID = tool:GetAttribute("PET_UUID")
-                        if petID then
-                            local petDetail = Pet:GetPetDetail(petID)
-                            if petDetail then
-                                -- Kita selipkan data 'weight' untuk keperluan sorting
-                                table.insert(currentOptionsSet, {
-                                    text = Pet:SerializePet(petDetail), 
-                                    value = petID,
-                                    weight = tonumber(petDetail.BaseWeight) or 0
-                                })
-                            end
-                        end
+                    if tool:GetAttribute("d") then
+                        local id = tool:GetAttribute("PET_UUID")
+                        if id then inventoryFavorites[id] = true end
+                    end
+                end
+
+                -- 2. Tarik SEMUA pet (di tas + di garden)
+                for _, pet in pairs(Pet:GetAllMyPets()) do
+                    if pet.IsFavorited or inventoryFavorites[pet.ID] then
+                        table.insert(currentOptionsSet, {
+                            text = Pet:SerializePet(pet), 
+                            value = pet.ID,
+                            weight = tonumber(pet.BaseWeight) or 0
+                        })
                     end
                 end
                 
@@ -384,26 +385,24 @@ function m:AddTestFavoriteSection(tab)
                     return 
                 end
                 
-                local count = 0
+                -- Kumpulkan dari tas
+                local inventoryFavorites = {}
                 for _, tool in pairs(Pet:GetAllOwnedPets()) do
-                    local isFavorited = tool:GetAttribute("d") or false
-                    if isFavorited then
-                        count = count + 1
-                        local petID = tool:GetAttribute("PET_UUID")
-                        local petDetail = Pet:GetPetDetail(petID)
-                        
-                        -- Mengambil nama, tipe pet, dan berat
-                        local petName = "Unknown"
-                        local petWeight = 0
-                        if petDetail then
-                            petName = petDetail.Name or petDetail.Type
-                            petWeight = petDetail.BaseWeight or 0
-                        end
-                        
-                        print("Detected Favorite: " .. petName .. " [" .. tostring(petWeight) .. " KG] (ID: " .. tostring(petID) .. ")")
+                    if tool:GetAttribute("d") then
+                        local id = tool:GetAttribute("PET_UUID")
+                        if id then inventoryFavorites[id] = true end
                     end
                 end
-                print("Total Favorite Pets Found in Bag: " .. count)
+
+                local count = 0
+                for _, pet in pairs(Pet:GetAllMyPets()) do
+                    if pet.IsFavorited or inventoryFavorites[pet.ID] then
+                        count = count + 1
+                        local statusLoc = pet.IsActive and "[DI GARDEN]" or "[DI TAS]"
+                        print("Detected Favorite: " .. (pet.Name or pet.Type) .. " [" .. tostring(pet.BaseWeight) .. " KG] " .. statusLoc .. " (ID: " .. pet.ID .. ")")
+                    end
+                end
+                print("Total Favorite Pets Found (Garden + Bag): " .. count)
             end
         })
     end
