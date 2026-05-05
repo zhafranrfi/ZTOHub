@@ -419,7 +419,6 @@ function m:AddAdvancedTeamLevelingSection(tab)
         
         accordion:AddLabel("--- 1. Konfigurasi Leveling ---")
 
-        -- Mengganti AddSlider menjadi AddNumberBox agar sesuai dengan UI kamu
         accordion:AddNumberBox({
             Name = "Target Level Maksimal",
             Default = 100,
@@ -429,7 +428,6 @@ function m:AddAdvancedTeamLevelingSection(tab)
             Flag = "FeatureAdvTargetLevel"
         })
 
-        -- Mengganti AddSlider menjadi AddNumberBox
         accordion:AddNumberBox({
             Name = "Maksimal Pet Leveling (Tumbal) di Garden",
             Default = 1,
@@ -451,39 +449,22 @@ function m:AddAdvancedTeamLevelingSection(tab)
             OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(m:ScanAndGetFavorites()) end end
         })
 
+        -- SISTEM DIKEMBALIKAN PERSIS SEPERTI PET LEVELING LAMA
         accordion:AddSelectBox({
             Name = "Target Pet Leveling",
             Options = {"Loading..."},
-            Placeholder = "Pilih pet yang akan dinaikkan levelnya...",
+            Placeholder = "Select Pet Types...",
             MultiSelect = true,
             Flag = "FeatureAdvTargetPets",
             OnInit = function(api, optionsData)
                 if not Pet then return end
-                local opts = {}
-                for _, tool in pairs(Pet:GetAllOwnedPets()) do
-                    local petID = tool:GetAttribute("PET_UUID")
-                    if petID then
-                        local detail = Pet:GetPetDetail(petID)
-                        if detail then
-                            table.insert(opts, {text = Pet:SerializePet(detail), value = petID})
-                        end
-                    end
-                end
-                optionsData.updateOptions(opts)
+                local petTypes = Pet:GetPetRegistry()
+                optionsData.updateOptions(petTypes)
             end,
             OnDropdownOpen = function(currentOptions, updateOptions)
                 if not Pet then return end
-                local opts = {}
-                for _, tool in pairs(Pet:GetAllOwnedPets()) do
-                    local petID = tool:GetAttribute("PET_UUID")
-                    if petID then
-                        local detail = Pet:GetPetDetail(petID)
-                        if detail then
-                            table.insert(opts, {text = Pet:SerializePet(detail), value = petID})
-                        end
-                    end
-                end
-                updateOptions(opts)
+                local petTypes = Pet:GetPetRegistry()
+                updateOptions(petTypes)
             end
         })
 
@@ -506,7 +487,6 @@ function m:AddAdvancedTeamLevelingSection(tab)
             end
         })
     end
-
     
     function m:ProcessAdvancedLeveling()
         if not Pet then return end
