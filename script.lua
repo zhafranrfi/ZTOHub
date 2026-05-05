@@ -408,7 +408,7 @@ EmbeddedModules["feature/ui.lua"] = function()
     -- ================================================================= --
     -- FITUR BARU: AUTO TEAM + AUTO LEVELING
     -- ================================================================= --
-    function m:AddAdvancedTeamLevelingSection(tab)
+function m:AddAdvancedTeamLevelingSection(tab)
         local accordion = tab:AddAccordion({
             Title = "Advanced Auto Leveling & Team",
             Icon = "⚡",
@@ -419,19 +419,23 @@ EmbeddedModules["feature/ui.lua"] = function()
         
         accordion:AddLabel("--- 1. Konfigurasi Leveling ---")
 
-        accordion:AddSlider({
+        -- Mengganti AddSlider menjadi AddNumberBox agar sesuai dengan UI kamu
+        accordion:AddNumberBox({
             Name = "Target Level Maksimal",
-            Value = 100,
+            Default = 100,
             Min = 1,
             Max = 100,
+            Increment = 1,
             Flag = "FeatureAdvTargetLevel"
         })
 
-        accordion:AddSlider({
+        -- Mengganti AddSlider menjadi AddNumberBox
+        accordion:AddNumberBox({
             Name = "Maksimal Pet Leveling (Tumbal) di Garden",
-            Value = 1,
+            Default = 1,
             Min = 1,
             Max = 15,
+            Increment = 1,
             Flag = "FeatureAdvMaxSlots"
         })
 
@@ -443,8 +447,8 @@ EmbeddedModules["feature/ui.lua"] = function()
             Placeholder = "Pilih pet favorit yang akan dijaga di garden...",
             MultiSelect = true,
             Flag = "FeatureAdvCoreTeam",
-            OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(self:ScanAndGetFavorites()) end end,
-            OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(self:ScanAndGetFavorites()) end end
+            OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(m:ScanAndGetFavorites()) end end,
+            OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(m:ScanAndGetFavorites()) end end
         })
 
         accordion:AddSelectBox({
@@ -494,7 +498,7 @@ EmbeddedModules["feature/ui.lua"] = function()
                 if value then
                     task.spawn(function()
                         while m.AdvLevelingLoopActive do
-                            self:ProcessAdvancedLeveling()
+                            m:ProcessAdvancedLeveling()
                             task.wait(2)
                         end
                     end)
@@ -503,6 +507,7 @@ EmbeddedModules["feature/ui.lua"] = function()
         })
     end
 
+    
     function m:ProcessAdvancedLeveling()
         if not Pet then return end
         if Pet:GetCurrentPetTeam() ~= "core" then return end
