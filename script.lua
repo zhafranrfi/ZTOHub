@@ -299,7 +299,76 @@ function m:AddTestFavoriteSection(tab)
             Expanded = true,
         })
 
-        accordion:AddLabel("Dropdown ini menampilkan SEMUA pet berstatus Favorit (baik di Tas maupun di Garden), diurutkan dari yang terberat.")
+        accordion:AddLabel("Dropdown ini menampilkan SEMUA pet favorit (di Tas & Garden).")
+        accordion:AddLabel("TIPS: Jika pet di garden belum terdeteksi, masukkan ke tas SEBENTAR lalu keluarkan lagi agar script mencatatnya di memori permanen.")
+
+        -- Sistem Memori Permanen di level modul
+        m.FavoriteMemory = m.FavoriteMemory or {}
+
+        local function scanAndGetFavorites()
+            local currentOptionsSet = {}
+            if not Pet then return currentOptionsSet end
+
+            -- 1. Scan Inventory (Sumber paling akurat, update memori)
+            for _, tool in pairs(Pet:GetAllOwnedPets()) do
+                local petID = tool:GetAttribute("PET_UUID")
+                if petID then
+                    if tool:GetAttribute("d") then
+                        m.FavoriteMemory[petID] = true -- Simpan ke memori permanen
+                    else
+                        m.FavoriteMemory[petID] = nil -- Hapus dari memori jika bintang dicabut
+                    end
+                end
+            end
+
+            -- 2. Kumpulkan semua pet (Tas + Garden)
+            local addedIDs = {}
+            for _, pet in pairs(Pet:GetAllMyPets()) do
+                local petID = pet.ID
+                if addedIDs[petID] then continue end
+
+                -- Cek dari data normal atau memori script
+                local isFav = pet.IsFavorited or m.FavoriteMemory[petID]
+
+                -- 3. Penggalian Agresif (Aggressive Digging) ke Data Mentah Server
+                if not isFav then
+                    local rawData = Pet:GetPetData(petID)
+                    if rawData then
+                        if rawData.d or rawData.IsFavorited or rawData.Favorited then
+                            isFav = true
+                        elseif rawData.PetData and (rawData.PetData.d or rawData.PetData.Favorited) then
+                            isFav = true
+                        end
+                    end
+                end
+
+                -- 4. Cek Fisik Model di Garden (Proteksi lapis terakhir)
+                if not isFav then
+                    local physicalModel = Pet:GetModelPet(petID)
+                    if physicalModel and (physicalModel:GetAttribute("d") or physicalModel:GetAttribute("IsFavorited")) then
+                        isFav = true
+                    end
+                end
+
+                -- Jika terbukti favorit dari salah satu lapis pengecekan di atas
+                if isFav then
+                    m.FavoriteMemory[petID] = true -- Catat ke memori agar tidak hilang saat di garden
+                    addedIDs[petID] = true
+                    table.insert(currentOptionsSet, {
+                        text = Pet:SerializePet(pet), 
+                        value = petID,
+                        weight = tonumber(pet.BaseWeight) or 0
+                    })
+                end
+            end
+
+            -- Sorting dari terberat
+            table.sort(currentOptionsSet, function(a, b)
+                return a.weight > b.weight
+            end)
+
+            return currentOptionsSet
+        end
 
         accordion:AddSelectBox({
             Name = "Detected Favorite Pets",
@@ -312,68 +381,11 @@ function m:AddTestFavoriteSection(tab)
                     optionsData.updateOptions({{text = "Menunggu Modul Pet...", value = "nil"}})
                     return 
                 end
-
-                local currentOptionsSet = {}
-                
-                -- 1. Kumpulkan ID pet favorit yang ada di Tas (Akurasi mutlak)
-                local inventoryFavorites = {}
-                for _, tool in pairs(Pet:GetAllOwnedPets()) do
-                    if tool:GetAttribute("d") then
-                        local id = tool:GetAttribute("PET_UUID")
-                        if id then inventoryFavorites[id] = true end
-                    end
-                end
-
-                -- 2. Tarik SEMUA pet (di tas + di garden)
-                for _, pet in pairs(Pet:GetAllMyPets()) do
-                    -- Jika pet ini favorit di server ATAU terdeteksi favorit di tas
-                    if pet.IsFavorited or inventoryFavorites[pet.ID] then
-                        table.insert(currentOptionsSet, {
-                            text = Pet:SerializePet(pet), 
-                            value = pet.ID,
-                            weight = tonumber(pet.BaseWeight) or 0
-                        })
-                    end
-                end
-                
-                -- PROSES SORTING: Dari berat terbesar (>) ke terkecil
-                table.sort(currentOptionsSet, function(a, b)
-                    return a.weight > b.weight
-                end)
-
-                optionsData.updateOptions(currentOptionsSet)
+                optionsData.updateOptions(scanAndGetFavorites())
             end,
             OnDropdownOpen = function(currentOptions, updateOptions)
                 if not Pet then return end
-
-                local currentOptionsSet = {}
-                
-                -- 1. Kumpulkan ID pet favorit yang ada di Tas
-                local inventoryFavorites = {}
-                for _, tool in pairs(Pet:GetAllOwnedPets()) do
-                    if tool:GetAttribute("d") then
-                        local id = tool:GetAttribute("PET_UUID")
-                        if id then inventoryFavorites[id] = true end
-                    end
-                end
-
-                -- 2. Tarik SEMUA pet (di tas + di garden)
-                for _, pet in pairs(Pet:GetAllMyPets()) do
-                    if pet.IsFavorited or inventoryFavorites[pet.ID] then
-                        table.insert(currentOptionsSet, {
-                            text = Pet:SerializePet(pet), 
-                            value = pet.ID,
-                            weight = tonumber(pet.BaseWeight) or 0
-                        })
-                    end
-                end
-                
-                -- PROSES SORTING: Dari berat terbesar (>) ke terkecil
-                table.sort(currentOptionsSet, function(a, b)
-                    return a.weight > b.weight
-                end)
-
-                updateOptions(currentOptionsSet)
+                updateOptions(scanAndGetFavorites())
             end
         })
 
@@ -385,24 +397,11 @@ function m:AddTestFavoriteSection(tab)
                     return 
                 end
                 
-                -- Kumpulkan dari tas
-                local inventoryFavorites = {}
-                for _, tool in pairs(Pet:GetAllOwnedPets()) do
-                    if tool:GetAttribute("d") then
-                        local id = tool:GetAttribute("PET_UUID")
-                        if id then inventoryFavorites[id] = true end
-                    end
+                local results = scanAndGetFavorites()
+                for _, data in ipairs(results) do
+                    print("Detected Favorite: " .. data.text .. " (ID: " .. data.value .. ")")
                 end
-
-                local count = 0
-                for _, pet in pairs(Pet:GetAllMyPets()) do
-                    if pet.IsFavorited or inventoryFavorites[pet.ID] then
-                        count = count + 1
-                        local statusLoc = pet.IsActive and "[DI GARDEN]" or "[DI TAS]"
-                        print("Detected Favorite: " .. (pet.Name or pet.Type) .. " [" .. tostring(pet.BaseWeight) .. " KG] " .. statusLoc .. " (ID: " .. pet.ID .. ")")
-                    end
-                end
-                print("Total Favorite Pets Found (Garden + Bag): " .. count)
+                print("Total Favorite Pets Found (Memory + Garden + Bag): " .. #results)
             end
         })
     end
