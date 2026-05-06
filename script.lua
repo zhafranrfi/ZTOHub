@@ -13456,7 +13456,7 @@ local configFolder = "EzHub/AfiHub"
 
 -- Initialize window
 local window = EzUI:CreateNew({
-    Title = "AfiHub 1.119",
+    Title = "AfiHub 1.12",
     Width = 700,
     Height = 400,
     Opacity = 0.9,
