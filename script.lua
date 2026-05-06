@@ -414,7 +414,7 @@ function m:AddAdvancedTeamLevelingSection(tab)
         local accordion = tab:AddAccordion({
             Title = "Advanced Auto Leveling & Team",
             Icon = "⚡",
-            Expanded = true,
+            Expanded = false,
         })
 
         accordion:AddLabel("⚠️ WARNING: Matikan Auto Leveling lama di tab Pet terlebih dahulu!")
@@ -590,7 +590,7 @@ function m:AddAdvancedTeamLevelingSection(tab)
         local accordion = tab:AddAccordion({
             Title = "Auto Growth (Multi-Stage)",
             Icon = "📈",
-            Expanded = true,
+            Expanded = false,
         })
 
         accordion:AddLabel("⚠️ WARNING: Fitur ini akan berganti Tim secara otomatis! Jangan nyalakan bersamaan dengan Auto Leveling biasa.")
