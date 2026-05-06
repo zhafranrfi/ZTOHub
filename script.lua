@@ -688,7 +688,7 @@ function m:AddAdvancedTeamLevelingSection(tab)
         })
     end
 
-    function m:ProcessAutoGrowth()
+   function m:ProcessAutoGrowth()
         if not Pet then return end
         if Pet:GetCurrentPetTeam() ~= "core" then return end
 
@@ -702,18 +702,25 @@ function m:AddAdvancedTeamLevelingSection(tab)
 
         local targetPetsUnderBW = {}
         local targetPetsDoneBW = {}
+        local processedPets = {}
 
-        for _, tool in pairs(Pet:GetAllOwnedPets()) do
-            if tool:GetAttribute("d") then continue end 
-            local petID = tool:GetAttribute("PET_UUID")
-            if not petID then continue end
+        -- FUNGSI LOKAL: Mengolah dan memfilter data pet secara akurat
+        local function processPetData(petID, tool)
+            if not petID or processedPets[petID] then return end
             
+            -- Proteksi Anti-Tumbal (Favorit Lapis Baja)
+            local isFav = false
+            if tool and tool:GetAttribute("d") then isFav = true end
+            if m.FavoriteMemory and m.FavoriteMemory[petID] then isFav = true end
+            if isFav then return end
+
             local detail = Pet:GetPetDetail(petID)
-            if not detail then continue end
+            if not detail then return end
+            processedPets[petID] = true
 
             local isMatch = false
             for _, typeName in ipairs(targetPetTypes) do
-                if detail.Type == typeName then isMatch = true; break end
+                if detail.Type == typeName or petID == typeName then isMatch = true; break end
             end
 
             if isMatch then
@@ -725,8 +732,19 @@ function m:AddAdvancedTeamLevelingSection(tab)
             end
         end
 
+        -- 1. Pindai Pet di dalam Tas
+        for _, tool in pairs(Pet:GetAllOwnedPets()) do
+            processPetData(tool:GetAttribute("PET_UUID"), tool)
+        end
+
+        -- 2. Pindai Pet yang sedang Aktif di Garden (MENCEGAH BUG SWITCH PREMATUR)
+        local activePets = Pet:GetAllActivePets() or {}
+        for petID, _ in pairs(activePets) do
+            processPetData(petID, nil)
+        end
+
         if #targetPetsUnderBW == 0 and #targetPetsDoneBW == 0 then
-            if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("Status: Tidak ada pet target ditemukan di tas.") end
+            if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("Status: Tidak ada pet target ditemukan.") end
             return
         end
 
@@ -774,7 +792,6 @@ function m:AddAdvancedTeamLevelingSection(tab)
         end
 
         local activeCoreTeam = (m.AutoGrowthState == "RESETTING") and team2 or team1
-        local activePets = Pet:GetAllActivePets() or {}
         local currentTargetEquipped = 0
         local unequippedAny = false
 
@@ -801,16 +818,16 @@ function m:AddAdvancedTeamLevelingSection(tab)
 
             local isTypeMatch = false
             for _, typeName in ipairs(targetPetTypes) do
-                if detail.Type == typeName then isTypeMatch = true; break end
+                if detail.Type == typeName or petID == typeName then isTypeMatch = true; break end
             end
 
             if isCore then
                 -- Biarkan pet core bekerja
             elseif isTypeMatch and isTargetValid then
                 currentTargetEquipped = currentTargetEquipped + 1
-                -- Tidak ada penembakan shard di sini, biarkan Elephant yang bekerja
             else
                 Pet:UnequipPet(petID)
+                activePets[petID] = nil -- Hapus sementara dari tabel agar tak terbaca di Tahap C
                 unequippedAny = true
                 task.wait(0.4)
             end
