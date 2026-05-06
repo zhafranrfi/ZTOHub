@@ -1,4 +1,4 @@
-
+-- Modifier By Afi
 
 local EmbeddedModules = {}
 
@@ -292,6 +292,8 @@ EmbeddedModules["feature/ui.lua"] = function()
         self:AddTestFavoriteSection(tab)
         self:AddPetTeamsManagementSection(tab)
         self:AddAdvancedTeamLevelingSection(tab)
+        self:AddAutoGrowthSection(tab)
+        
     end
 
     -- FUNGSI BERSAMA: Memindai dan mendapatkan data pet favorit (Akurat 100%)
@@ -405,9 +407,9 @@ EmbeddedModules["feature/ui.lua"] = function()
         })
     end
 
-    -- ================================================================= --
-    -- FITUR BARU: AUTO TEAM + AUTO LEVELING
-    -- ================================================================= --
+ 
+    -- FITUR : AUTO TEAM + AUTO LEVELING
+
 function m:AddAdvancedTeamLevelingSection(tab)
         local accordion = tab:AddAccordion({
             Title = "Advanced Auto Leveling & Team",
@@ -582,6 +584,282 @@ function m:AddAdvancedTeamLevelingSection(tab)
         end
     end
 
+    --  BARU: AUTO GROWTH MULTI-STAGE (LEVELING -> ELEPHANT RESET -> FINISHING)
+
+    function m:AddAutoGrowthSection(tab)
+        local accordion = tab:AddAccordion({
+            Title = "Auto Growth (Multi-Stage)",
+            Icon = "📈",
+            Expanded = true,
+        })
+
+        accordion:AddLabel("⚠️ WARNING: Fitur ini akan berganti Tim secara otomatis! Jangan nyalakan bersamaan dengan Auto Leveling biasa.")
+        
+        accordion:AddLabel("--- 1. Konfigurasi Target ---")
+
+        accordion:AddNumberBox({
+            Name = "Target Minimal BW (KG)",
+            Default = 10.0,
+            Min = 0.1,
+            Max = 1000.0,
+            Increment = 0.5,
+            Decimals = 2,
+            Flag = "FeatureGrowthTargetWeight"
+        })
+
+        accordion:AddNumberBox({
+            Name = "Maksimal Pet Target di Garden",
+            Default = 1,
+            Min = 1,
+            Max = 15,
+            Increment = 1,
+            Flag = "FeatureGrowthMaxSlots"
+        })
+
+        accordion:AddSelectBox({
+            Name = "Spesies Pet Target",
+            Options = {"Loading..."},
+            Placeholder = "Pilih pet yang akan digemukkan...",
+            MultiSelect = true,
+            Flag = "FeatureGrowthTargetPets",
+            OnInit = function(api, optionsData)
+                if not Pet then return end
+                optionsData.updateOptions(Pet:GetPetRegistry())
+            end,
+            OnDropdownOpen = function(currentOptions, updateOptions)
+                if not Pet then return end
+                updateOptions(Pet:GetPetRegistry())
+            end
+        })
+
+        accordion:AddLabel("--- 2. Pengaturan Tim ---")
+
+        accordion:AddSelectBox({
+            Name = "Tim 1 (Fase Leveling)",
+            Options = {"Loading..."},
+            Placeholder = "Pilih pet untuk leveling (Fase 1 & 3)...",
+            MultiSelect = true,
+            Flag = "FeatureGrowthTeam1",
+            OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(m:ScanAndGetFavorites()) end end,
+            OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(m:ScanAndGetFavorites()) end end
+        })
+
+        accordion:AddSelectBox({
+            Name = "Tim 2 (Fase Elephant/Reset)",
+            Options = {"Loading..."},
+            Placeholder = "Pilih Tim berisi Elephant (Fase 2)...",
+            MultiSelect = true,
+            Flag = "FeatureGrowthTeam2",
+            OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(m:ScanAndGetFavorites()) end end,
+            OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(m:ScanAndGetFavorites()) end end
+        })
+
+        accordion:AddLabel("--- 3. Eksekusi ---")
+
+        local statusLabel = accordion:AddLabel("Status: Menunggu...")
+        m.GrowthStatusLabel = statusLabel 
+
+        accordion:AddToggle({
+            Name = "Enable Auto Growth Multi-Stage",
+            Default = false,
+            Flag = "FeatureGrowthToggle",
+            Callback = function(value)
+                m.GrowthLoopActive = value
+                if value then
+                    m.AutoGrowthState = "IDLE" 
+                    task.spawn(function()
+                        while m.GrowthLoopActive do
+                            m:ProcessAutoGrowth()
+                            task.wait(2)
+                        end
+                    end)
+                else
+                    if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("Status: Berhenti.") end
+                    task.spawn(function()
+                        if not Pet then return end
+                        local activePets = Pet:GetAllActivePets() or {}
+                        for petID, _ in pairs(activePets) do
+                            Pet:UnequipPet(petID)
+                            task.wait(0.25)
+                        end
+                    end)
+                end
+            end
+        })
+    end
+
+    function m:ProcessAutoGrowth()
+        if not Pet then return end
+        if Pet:GetCurrentPetTeam() ~= "core" then return end
+
+        local team1 = Window:GetConfigValue("FeatureGrowthTeam1") or {}
+        local team2 = Window:GetConfigValue("FeatureGrowthTeam2") or {}
+        local targetPetTypes = Window:GetConfigValue("FeatureGrowthTargetPets") or {}
+        local targetWeight = Window:GetConfigValue("FeatureGrowthTargetWeight") or 10.0
+        local maxTarget = Window:GetConfigValue("FeatureGrowthMaxSlots") or 1
+
+        if #targetPetTypes == 0 then return end
+
+        local targetPetsUnderBW = {}
+        local targetPetsDoneBW = {}
+
+        for _, tool in pairs(Pet:GetAllOwnedPets()) do
+            if tool:GetAttribute("d") then continue end 
+            local petID = tool:GetAttribute("PET_UUID")
+            if not petID then continue end
+            
+            local detail = Pet:GetPetDetail(petID)
+            if not detail then continue end
+
+            local isMatch = false
+            for _, typeName in ipairs(targetPetTypes) do
+                if detail.Type == typeName then isMatch = true; break end
+            end
+
+            if isMatch then
+                if detail.BaseWeight < targetWeight then
+                    table.insert(targetPetsUnderBW, detail)
+                else
+                    table.insert(targetPetsDoneBW, detail)
+                end
+            end
+        end
+
+        if #targetPetsUnderBW == 0 and #targetPetsDoneBW == 0 then
+            if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("Status: Tidak ada pet target ditemukan di tas.") end
+            return
+        end
+
+        local countNeedsLevel50 = 0
+        local countNeedsReset = 0
+        local countNeedsLevel100 = 0
+
+        for _, p in ipairs(targetPetsUnderBW) do
+            if p.Age < 50 then countNeedsLevel50 = countNeedsLevel50 + 1 end
+            if p.Age >= 50 then countNeedsReset = countNeedsReset + 1 end
+        end
+
+        for _, p in ipairs(targetPetsDoneBW) do
+            if p.Age < 100 then countNeedsLevel100 = countNeedsLevel100 + 1 end
+        end
+
+        m.AutoGrowthState = m.AutoGrowthState or "IDLE"
+
+        if #targetPetsUnderBW == 0 then
+            if countNeedsLevel100 == 0 then
+                m.AutoGrowthState = "DONE"
+                if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("Status: ✅ SEMUA TARGET SELESAI (BW & LVL 100)!") end
+                return
+            else
+                m.AutoGrowthState = "LEVELING_100"
+                if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("Status: Fase 3 - Leveling Akhir ke 100 (Tim 1)") end
+            end
+        else
+            if m.AutoGrowthState == "IDLE" or m.AutoGrowthState == "LEVELING_50" or m.AutoGrowthState == "LEVELING_100" then
+                if countNeedsLevel50 == 0 and countNeedsReset > 0 then
+                    m.AutoGrowthState = "RESETTING"
+                    if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("Status: Fase 2 - Menunggu Reset Elephant (Tim 2)") end
+                else
+                    m.AutoGrowthState = "LEVELING_50"
+                    if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText(string.format("Status: Fase 1 - Leveling ke 50 (Sisa %d blm 50)", countNeedsLevel50)) end
+                end
+            elseif m.AutoGrowthState == "RESETTING" then
+                if countNeedsReset == 0 then
+                    m.AutoGrowthState = "LEVELING_50"
+                    if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("Status: Reset Selesai. Kembali ke Fase 1.") end
+                else
+                    if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText(string.format("Status: Fase 2 - Menunggu Reset Elephant (Sisa %d)", countNeedsReset)) end
+                end
+            end
+        end
+
+        local activeCoreTeam = (m.AutoGrowthState == "RESETTING") and team2 or team1
+        local activePets = Pet:GetAllActivePets() or {}
+        local currentTargetEquipped = 0
+        local unequippedAny = false
+
+        local coreTeamLookup = {}
+        for _, id in ipairs(activeCoreTeam) do
+            coreTeamLookup[id] = true
+        end
+
+        -- TAHAP A: Bersih-bersih garden
+        for petID, _ in pairs(activePets) do
+            local detail = Pet:GetPetDetail(petID)
+            if not detail then continue end
+
+            local isCore = coreTeamLookup[petID]
+            
+            local isTargetValid = false
+            if m.AutoGrowthState == "LEVELING_50" then
+                isTargetValid = (detail.BaseWeight < targetWeight and detail.Age < 50)
+            elseif m.AutoGrowthState == "RESETTING" then
+                isTargetValid = (detail.BaseWeight < targetWeight and detail.Age >= 50)
+            elseif m.AutoGrowthState == "LEVELING_100" then
+                isTargetValid = (detail.BaseWeight >= targetWeight and detail.Age < 100)
+            end
+
+            local isTypeMatch = false
+            for _, typeName in ipairs(targetPetTypes) do
+                if detail.Type == typeName then isTypeMatch = true; break end
+            end
+
+            if isCore then
+                -- Biarkan pet core bekerja
+            elseif isTypeMatch and isTargetValid then
+                currentTargetEquipped = currentTargetEquipped + 1
+                -- Tidak ada penembakan shard di sini, biarkan Elephant yang bekerja
+            else
+                Pet:UnequipPet(petID)
+                unequippedAny = true
+                task.wait(0.4)
+            end
+        end
+
+        if unequippedAny then
+            task.wait(1.5)
+            activePets = Pet:GetAllActivePets() or {} 
+        end
+
+        -- TAHAP B: Pemasangan Core Team
+        for _, petID in ipairs(activeCoreTeam) do
+            if not activePets[petID] then
+                Pet:EquipPet(petID)
+                activePets[petID] = true
+                task.wait(0.4)
+            end
+        end
+
+        -- TAHAP C: Pemasangan Target Pets
+        if currentTargetEquipped < maxTarget then
+            local slotsAvailable = maxTarget - currentTargetEquipped
+            local equipCount = 0
+
+            local pool = (m.AutoGrowthState == "LEVELING_100") and targetPetsDoneBW or targetPetsUnderBW
+
+            for _, p in ipairs(pool) do
+                if equipCount >= slotsAvailable then break end
+                if activePets[p.ID] then continue end
+
+                local shouldEquip = false
+                if m.AutoGrowthState == "LEVELING_50" and p.Age < 50 then
+                    shouldEquip = true
+                elseif m.AutoGrowthState == "RESETTING" and p.Age >= 50 then
+                    shouldEquip = true
+                elseif m.AutoGrowthState == "LEVELING_100" and p.Age < 100 then
+                    shouldEquip = true
+                end
+
+                if shouldEquip then
+                    Pet:EquipPet(p.ID)
+                    activePets[p.ID] = true
+                    equipCount = equipCount + 1
+                    task.wait(0.4)
+                end
+            end
+        end
+    end
+    
     return m
 end
 
@@ -677,7 +955,7 @@ EmbeddedModules["quest/season_pass.lua"] = function()
             task.wait(0.15) -- Wait for 0.15 seconds between claims to avoid spamming
         end
     end
-
+    
     return m
 end
 
