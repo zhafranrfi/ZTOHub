@@ -281,13 +281,11 @@ EmbeddedModules["feature/ui.lua"] = function()
 
         m.AdvLevelingLoopActive = false
         m.GrowthLoopActive = false
-        m.LastGrowthState = "IDLE" -- Untuk mendeteksi perubahan fase
+        m.LastGrowthState = "IDLE" 
         m:CreateFeatureTab()
 
-        -- SOLUSI POIN 1: Startup Check
-        -- Jika script dijalankan ulang dan toggle sudah posisi ON (dari config), jalankan loop
         task.spawn(function()
-            task.wait(2) -- Tunggu UI & Config siap
+            task.wait(3) 
             if Window:GetConfigValue("FeatureGrowthToggle") then
                 m.GrowthLoopActive = true
                 m.AutoGrowthState = "IDLE"
@@ -311,16 +309,17 @@ EmbeddedModules["feature/ui.lua"] = function()
         self:AddAutoGrowthSection(tab)
     end
 
-    -- FUNGSI BERSAMA: Memindai pet favorit 
     function m:ScanAndGetFavorites()
         m.FavoriteMemory = m.FavoriteMemory or {}
         local currentOptionsSet = {}
         if not Pet then return currentOptionsSet end
         local addedIDs = {}
+        
         for _, tool in pairs(Pet:GetAllOwnedPets()) do
             local petID = tool:GetAttribute("PET_UUID")
             if petID and tool:GetAttribute("d") then m.FavoriteMemory[petID] = true end
         end
+        
         for _, pet in pairs(Pet:GetAllMyPets()) do
             local petID = pet.ID
             if not addedIDs[petID] then
@@ -336,7 +335,6 @@ EmbeddedModules["feature/ui.lua"] = function()
         return currentOptionsSet
     end
 
-    -- FUNGSI PEMBANTU: Membersihkan seluruh Garden sampai tuntas
     function m:ForceClearGarden()
         if not Pet then return end
         if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("Status: 🧹 Membersihkan Garden (Pergantian Tim)...") end
@@ -349,7 +347,7 @@ EmbeddedModules["feature/ui.lua"] = function()
             task.wait(0.2)
         end
         
-        if count > 0 then task.wait(2) end -- Tunggu server benar-benar sinkron
+        if count > 0 then task.wait(2) end 
     end
 
     function m:AddTestFavoriteSection(tab)
@@ -419,41 +417,62 @@ EmbeddedModules["feature/ui.lua"] = function()
     end
 
     function m:ProcessAdvancedLeveling()
-        -- Logika Leveling tetap sama seperti versi terakhir kamu yang stabil
         if not Pet or Pet:GetCurrentPetTeam() ~= "core" then return end
         local coreTeam = Window:GetConfigValue("FeatureAdvCoreTeam") or {}
         local targetPets = Window:GetConfigValue("FeatureAdvTargetPets") or {}
-        local targetLevel = Window:GetConfigValue("FeatureAdvTargetLevel") or 100
-        local maxTarget = Window:GetConfigValue("FeatureAdvMaxSlots") or 1
+        
+        -- KONVERSI MUTLAK KE NUMBER
+        local targetLevel = tonumber(Window:GetConfigValue("FeatureAdvTargetLevel")) or 100
+        local maxTarget = tonumber(Window:GetConfigValue("FeatureAdvMaxSlots")) or 1
+        
         local coreTeamLookup = {}
         for _, id in ipairs(coreTeam) do coreTeamLookup[id] = true end
+        
         local targetLookup = {}
         for _, sel in ipairs(targetPets) do targetLookup[sel] = true end
+        
         local activePets = Pet:GetAllActivePets() or {}
         local currentLevelingCount = 0
         local unequippedAny = false
+
         for petID, _ in pairs(activePets) do
             local detail = Pet:GetPetDetail(petID)
             if detail then
                 if coreTeamLookup[petID] then continue end
-                if (targetLookup[petID] or targetLookup[detail.Type]) and detail.Age < targetLevel then
+                
+                local petType = detail.Type or ""
+                local petAge = tonumber(detail.Age) or 0 -- KONVERSI MUTLAK
+                
+                if (targetLookup[petID] or targetLookup[petType]) and petAge < targetLevel then
                     currentLevelingCount = currentLevelingCount + 1
                 else
-                    Pet:UnequipPet(petID); unequippedAny = true; task.wait(0.4)
+                    Pet:UnequipPet(petID)
+                    unequippedAny = true
+                    task.wait(0.4)
                 end
             end
         end
+        
         if unequippedAny then task.wait(1.5); activePets = Pet:GetAllActivePets() or {} end
-        for _, petID in ipairs(coreTeam) do if not activePets[petID] then Pet:EquipPet(petID); activePets[petID] = true; task.wait(0.4) end end
+        
+        for _, petID in ipairs(coreTeam) do 
+            if not activePets[petID] then Pet:EquipPet(petID); activePets[petID] = true; task.wait(0.4) end 
+        end
+        
         if currentLevelingCount < maxTarget then
             local slots = maxTarget - currentLevelingCount
             local count = 0
             for _, tool in pairs(Pet:GetAllOwnedPets()) do
                 if count >= slots then break end
                 local id = tool:GetAttribute("PET_UUID")
+                if not id then continue end
+                
                 local detail = Pet:GetPetDetail(id)
-                if id and not activePets[id] and not tool:GetAttribute("d") and not m.FavoriteMemory[id] and detail and detail.Age < targetLevel then
-                    if targetLookup[id] or targetLookup[detail.Type] then
+                if detail and not activePets[id] and not tool:GetAttribute("d") and not m.FavoriteMemory[id] then
+                    local petType = detail.Type or ""
+                    local petAge = tonumber(detail.Age) or 0 -- KONVERSI MUTLAK
+                    
+                    if petAge < targetLevel and (targetLookup[id] or targetLookup[petType]) then
                         Pet:EquipPet(id); activePets[id] = true; count = count + 1; task.wait(0.4)
                     end
                 end
@@ -510,31 +529,55 @@ EmbeddedModules["feature/ui.lua"] = function()
         local team1 = Window:GetConfigValue("FeatureGrowthTeam1") or {}
         local team2 = Window:GetConfigValue("FeatureGrowthTeam2") or {}
         local targetPetTypes = Window:GetConfigValue("FeatureGrowthTargetPets") or {}
-        local targetWeight = Window:GetConfigValue("FeatureGrowthTargetWeight") or 10.0
-        local maxTarget = Window:GetConfigValue("FeatureGrowthMaxSlots") or 1
+        
+        -- KONVERSI MUTLAK KE NUMBER
+        local targetWeight = tonumber(Window:GetConfigValue("FeatureGrowthTargetWeight")) or 10.0
+        local maxTarget = tonumber(Window:GetConfigValue("FeatureGrowthMaxSlots")) or 1
+        
         if #targetPetTypes == 0 then return end
 
         local targetUnderBW = {}
         local targetDoneBW = {}
         local processed = {}
+        
         local function scan(id, tool)
             if not id or processed[id] then return end
             if (tool and tool:GetAttribute("d")) or (m.FavoriteMemory and m.FavoriteMemory[id]) then return end
+            
             local d = Pet:GetPetDetail(id)
             if not d then return end
             processed[id] = true
+            
+            local petType = d.Type or ""
+            local petBW = tonumber(d.BaseWeight) or 0 -- KONVERSI MUTLAK
+            
             local match = false
-            for _, t in ipairs(targetPetTypes) do if d.Type == t or id == t then match = true; break end end
-            if match then if d.BaseWeight < targetWeight then table.insert(targetUnderBW, d) else table.insert(targetDoneBW, d) end end
+            for _, t in ipairs(targetPetTypes) do 
+                if petType == t or id == t then match = true; break end 
+            end
+            
+            if match then 
+                if petBW < targetWeight then 
+                    table.insert(targetUnderBW, d) 
+                else 
+                    table.insert(targetDoneBW, d) 
+                end 
+            end
         end
+        
         for _, t in pairs(Pet:GetAllOwnedPets()) do scan(t:GetAttribute("PET_UUID"), t) end
         local activePets = Pet:GetAllActivePets() or {}
         for id, _ in pairs(activePets) do scan(id, nil) end
 
-        -- HITUNG STATE
         local needs50, needsReset, needs100 = 0, 0, 0
-        for _, p in ipairs(targetUnderBW) do if p.Age < 50 then needs50 = needs50 + 1 else needsReset = needsReset + 1 end end
-        for _, p in ipairs(targetDoneBW) do if p.Age < 100 then needs100 = needs100 + 1 end end
+        for _, p in ipairs(targetUnderBW) do 
+            local age = tonumber(p.Age) or 0 -- KONVERSI MUTLAK
+            if age < 50 then needs50 = needs50 + 1 else needsReset = needsReset + 1 end 
+        end
+        for _, p in ipairs(targetDoneBW) do 
+            local age = tonumber(p.Age) or 0 -- KONVERSI MUTLAK
+            if age < 100 then needs100 = needs100 + 1 end 
+        end
 
         m.AutoGrowthState = m.AutoGrowthState or "IDLE"
         local newState = "IDLE"
@@ -545,11 +588,10 @@ EmbeddedModules["feature/ui.lua"] = function()
             if needs50 > 0 then newState = "LEVELING_50" else newState = "RESETTING" end
         end
 
-        -- SOLUSI POIN 2: Jika fase berubah, bersihkan Garden total sebelum lanjut
         if newState ~= m.LastGrowthState and newState ~= "DONE" then
             m.LastGrowthState = newState
             m:ForceClearGarden()
-            return -- Keluar loop ini, biarkan loop berikutnya yang mengisi pet baru
+            return 
         end
 
         if newState == "DONE" then
@@ -570,12 +612,19 @@ EmbeddedModules["feature/ui.lua"] = function()
             if d then
                 local isCore = coreLookup[id]
                 local valid = false
-                if newState == "LEVELING_50" then valid = (d.BaseWeight < targetWeight and d.Age < 50)
-                elseif newState == "RESETTING" then valid = (d.BaseWeight < targetWeight and d.Age >= 50)
-                elseif newState == "LEVELING_100" then valid = (d.BaseWeight >= targetWeight and d.Age < 100) end
+                
+                local petAge = tonumber(d.Age) or 0 -- KONVERSI MUTLAK
+                local petBW = tonumber(d.BaseWeight) or 0 -- KONVERSI MUTLAK
+                local petType = d.Type or ""
+                
+                if newState == "LEVELING_50" then valid = (petBW < targetWeight and petAge < 50)
+                elseif newState == "RESETTING" then valid = (petBW < targetWeight and petAge >= 50)
+                elseif newState == "LEVELING_100" then valid = (petBW >= targetWeight and petAge < 100) end
                 
                 local match = false
-                for _, t in ipairs(targetPetTypes) do if d.Type == t or id == t then match = true; break end end
+                for _, t in ipairs(targetPetTypes) do 
+                    if petType == t or id == t then match = true; break end 
+                end
 
                 if isCore then continue
                 elseif match and valid then currentEquipped = currentEquipped + 1
@@ -584,7 +633,10 @@ EmbeddedModules["feature/ui.lua"] = function()
         end
 
         if unequipped then task.wait(1.5); activePets = Pet:GetAllActivePets() or {} end
-        for _, id in ipairs(core) do if not activePets[id] then Pet:EquipPet(id); activePets[id] = true; task.wait(0.4) end end
+        for _, id in ipairs(core) do 
+            if not activePets[id] then Pet:EquipPet(id); activePets[id] = true; task.wait(0.4) end 
+        end
+        
         if currentEquipped < maxTarget then
             local slots = maxTarget - currentEquipped
             local count = 0
@@ -592,10 +644,14 @@ EmbeddedModules["feature/ui.lua"] = function()
             for _, p in ipairs(pool) do
                 if count >= slots then break end
                 if activePets[p.ID] then continue end
+                
                 local should = false
-                if newState == "LEVELING_50" and p.Age < 50 then should = true
-                elseif newState == "RESETTING" and p.Age >= 50 then should = true
-                elseif newState == "LEVELING_100" and p.Age < 100 then should = true end
+                local petAge = tonumber(p.Age) or 0 -- KONVERSI MUTLAK
+                
+                if newState == "LEVELING_50" and petAge < 50 then should = true
+                elseif newState == "RESETTING" and petAge >= 50 then should = true
+                elseif newState == "LEVELING_100" and petAge < 100 then should = true end
+                
                 if should then Pet:EquipPet(p.ID); activePets[p.ID] = true; count = count + 1; task.wait(0.4) end
             end
         end
@@ -13197,7 +13253,7 @@ local configFolder = "EzHub/AfiHub"
 
 -- Initialize window
 local window = EzUI:CreateNew({
-    Title = "AfiHub 1.121",
+    Title = "AfiHub 1.121.1",
     Width = 700,
     Height = 400,
     Opacity = 0.9,
