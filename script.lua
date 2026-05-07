@@ -280,7 +280,23 @@ EmbeddedModules["feature/ui.lua"] = function()
         Pet = _pet
 
         m.AdvLevelingLoopActive = false
-        self:CreateFeatureTab()
+        m.GrowthLoopActive = false
+        m.LastGrowthState = "IDLE" -- Untuk mendeteksi perubahan fase
+        m:CreateFeatureTab()
+
+        -- SOLUSI POIN 1: Startup Check
+        -- Jika script dijalankan ulang dan toggle sudah posisi ON (dari config), jalankan loop
+        task.spawn(function()
+            task.wait(2) -- Tunggu UI & Config siap
+            if Window:GetConfigValue("FeatureGrowthToggle") then
+                m.GrowthLoopActive = true
+                m.AutoGrowthState = "IDLE"
+                while m.GrowthLoopActive do
+                    m:ProcessAutoGrowth()
+                    task.wait(2)
+                end
+            end
+        end)
     end
 
     function m:CreateFeatureTab()
@@ -293,590 +309,298 @@ EmbeddedModules["feature/ui.lua"] = function()
         self:AddPetTeamsManagementSection(tab)
         self:AddAdvancedTeamLevelingSection(tab)
         self:AddAutoGrowthSection(tab)
-        
     end
 
-    -- FUNGSI BERSAMA: Memindai dan mendapatkan data pet favorit (Akurat 100%)
+    -- FUNGSI BERSAMA: Memindai pet favorit 
     function m:ScanAndGetFavorites()
         m.FavoriteMemory = m.FavoriteMemory or {}
         local currentOptionsSet = {}
         if not Pet then return currentOptionsSet end
-
         local addedIDs = {}
-
         for _, tool in pairs(Pet:GetAllOwnedPets()) do
             local petID = tool:GetAttribute("PET_UUID")
-            if petID then
-                if tool:GetAttribute("d") then
-                    m.FavoriteMemory[petID] = true 
-                else
-                    m.FavoriteMemory[petID] = nil 
-                end
-            end
+            if petID and tool:GetAttribute("d") then m.FavoriteMemory[petID] = true end
         end
-
         for _, pet in pairs(Pet:GetAllMyPets()) do
             local petID = pet.ID
-            if addedIDs[petID] then continue end
-
-            local isFav = pet.IsFavorited or m.FavoriteMemory[petID]
-
-            if not isFav then
-                local rawData = Pet:GetPetData(petID)
-                if rawData and (rawData.d or rawData.IsFavorited or rawData.Favorited or (rawData.PetData and (rawData.PetData.d or rawData.PetData.Favorited))) then
-                    isFav = true
+            if not addedIDs[petID] then
+                local isFav = pet.IsFavorited or m.FavoriteMemory[petID]
+                if isFav then
+                    m.FavoriteMemory[petID] = true
+                    addedIDs[petID] = true
+                    table.insert(currentOptionsSet, {text = Pet:SerializePet(pet), value = petID, weight = tonumber(pet.BaseWeight) or 0})
                 end
-            end
-
-            if not isFav then
-                local physicalModel = Pet:GetModelPet(petID)
-                if physicalModel and (physicalModel:GetAttribute("d") or physicalModel:GetAttribute("IsFavorited")) then
-                    isFav = true
-                end
-            end
-
-            if isFav then
-                m.FavoriteMemory[petID] = true
-                addedIDs[petID] = true
-                table.insert(currentOptionsSet, {
-                    text = Pet:SerializePet(pet), 
-                    value = petID,
-                    weight = tonumber(pet.BaseWeight) or 0
-                })
             end
         end
-
         table.sort(currentOptionsSet, function(a, b) return a.weight > b.weight end)
         return currentOptionsSet
     end
 
+    -- FUNGSI PEMBANTU: Membersihkan seluruh Garden sampai tuntas
+    function m:ForceClearGarden()
+        if not Pet then return end
+        if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("Status: 🧹 Membersihkan Garden (Pergantian Tim)...") end
+        
+        local activePets = Pet:GetAllActivePets() or {}
+        local count = 0
+        for petID, _ in pairs(activePets) do
+            Pet:UnequipPet(petID)
+            count = count + 1
+            task.wait(0.2)
+        end
+        
+        if count > 0 then task.wait(2) end -- Tunggu server benar-benar sinkron
+    end
+
     function m:AddTestFavoriteSection(tab)
         local accordion = tab:AddAccordion({ Title = "Favorite Detection Test", Icon = "🔍", Expanded = false })
-        accordion:AddLabel("Dropdown ini menampilkan SEMUA pet favorit (di Tas & Garden).")
         accordion:AddSelectBox({
             Name = "Detected Favorite Pets",
             Options = {"Loading..."},
-            Placeholder = "Click to see favorite pets...",
             MultiSelect = true,
             Flag = "TestFavoritePets",
-            OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(self:ScanAndGetFavorites()) end end,
-            OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(self:ScanAndGetFavorites()) end end
-        })
-        
-        -- Tombol Print 
-        accordion:AddButton({
-            Text = "Print Total Favorites to Console (F9)",
-            Callback = function()
-                if not Pet then 
-                    print("Error: Modul Pet belum terhubung!")
-                    return 
-                end
-                
-                local results = self:ScanAndGetFavorites()
-                for _, data in ipairs(results) do
-                    print("Detected Favorite: " .. data.text .. " (ID: " .. data.value .. ")")
-                end
-                print("Total Favorite Pets Found (Memory + Garden + Bag): " .. #results)
-            end
+            OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(m:ScanAndGetFavorites()) end end,
+            OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(m:ScanAndGetFavorites()) end end
         })
     end
 
     function m:AddPetTeamsManagementSection(tab)
-        local accordion = tab:AddAccordion({ Title = "Pet Teams Management (Manual)", Icon = "🛠️", Expanded = false })
-        accordion:AddLabel("Pilih pet favoritmu, lalu tekan tombol untuk menempatkan mereka secara manual.")
+        local accordion = tab:AddAccordion({ Title = "Pet Teams Management", Icon = "🛠️", Expanded = false })
         accordion:AddSelectBox({
             Name = "Select Team (Favorites Only)",
             Options = {"Loading..."},
-            Placeholder = "Select pets to deploy...",
             MultiSelect = true,
             Flag = "FeatureDeployTeam",
-            OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(self:ScanAndGetFavorites()) end end,
-            OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(self:ScanAndGetFavorites()) end end
+            OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(m:ScanAndGetFavorites()) end end,
+            OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(m:ScanAndGetFavorites()) end end
         })
         accordion:AddButton({
             Text = "Deploy Selected Team 🚀",
-            Variant = "primary",
             Callback = function()
-                if not Pet then return end
-                local selectedPets = Window:GetConfigValue("FeatureDeployTeam") or {}
-                local activePets = Pet:GetAllActivePets() or {}
-                for petID, _ in pairs(activePets) do Pet:UnequipPet(petID); task.wait(0.25) end
-                task.wait(1.5)
-                for _, petID in ipairs(selectedPets) do Pet:EquipPet(petID); task.wait(0.5) end
+                local selected = Window:GetConfigValue("FeatureDeployTeam") or {}
+                m:ForceClearGarden()
+                for _, id in ipairs(selected) do Pet:EquipPet(id); task.wait(0.4) end
             end
         })
     end
 
- 
-    -- FITUR : AUTO TEAM + AUTO LEVELING
-
-function m:AddAdvancedTeamLevelingSection(tab)
-        local accordion = tab:AddAccordion({
-            Title = "Advanced Auto Leveling & Team",
-            Icon = "⚡",
-            Expanded = false,
-        })
-
-        accordion:AddLabel("⚠️ WARNING: Matikan Auto Leveling lama di tab Pet terlebih dahulu!")
-        
-        accordion:AddLabel("--- 1. Konfigurasi Leveling ---")
-
-        accordion:AddNumberBox({
-            Name = "Target Level Maksimal",
-            Default = 100,
-            Min = 1,
-            Max = 100,
-            Increment = 1,
-            Flag = "FeatureAdvTargetLevel"
-        })
-
-        accordion:AddNumberBox({
-            Name = "Maksimal Pet Leveling (Tumbal) di Garden",
-            Default = 1,
-            Min = 1,
-            Max = 15,
-            Increment = 1,
-            Flag = "FeatureAdvMaxSlots"
-        })
-
-        accordion:AddLabel("--- 2. Pemilihan Tim ---")
-
+    function m:AddAdvancedTeamLevelingSection(tab)
+        local accordion = tab:AddAccordion({ Title = "Advanced Auto Leveling & Team", Icon = "⚡", Expanded = false })
+        accordion:AddNumberBox({ Name = "Target Level Maksimal", Default = 100, Flag = "FeatureAdvTargetLevel" })
+        accordion:AddNumberBox({ Name = "Maksimal Pet Leveling", Default = 1, Flag = "FeatureAdvMaxSlots" })
         accordion:AddSelectBox({
-            Name = "Core Team (Pet Favorit Wajib)",
+            Name = "Core Team",
             Options = {"Loading..."},
-            Placeholder = "Pilih pet favorit yang akan dijaga di garden...",
             MultiSelect = true,
             Flag = "FeatureAdvCoreTeam",
             OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(m:ScanAndGetFavorites()) end end,
             OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(m:ScanAndGetFavorites()) end end
         })
-
-        -- SISTEM DIKEMBALIKAN PERSIS SEPERTI PET LEVELING LAMA
         accordion:AddSelectBox({
             Name = "Target Pet Leveling",
             Options = {"Loading..."},
-            Placeholder = "Select Pet Types...",
             MultiSelect = true,
             Flag = "FeatureAdvTargetPets",
-            OnInit = function(api, optionsData)
-                if not Pet then return end
-                local petTypes = Pet:GetPetRegistry()
-                optionsData.updateOptions(petTypes)
-            end,
-            OnDropdownOpen = function(currentOptions, updateOptions)
-                if not Pet then return end
-                local petTypes = Pet:GetPetRegistry()
-                updateOptions(petTypes)
-            end
+            OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(Pet:GetPetRegistry()) end end,
+            OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(Pet:GetPetRegistry()) end end
         })
-
-        accordion:AddLabel("--- 3. Eksekusi ---")
-
         accordion:AddToggle({
             Name = "Enable Auto Team + Leveling",
-            Default = false,
             Flag = "FeatureAdvLevelingToggle",
             Callback = function(value)
                 m.AdvLevelingLoopActive = value
                 if value then
-                    task.spawn(function()
-                        while m.AdvLevelingLoopActive do
-                            m:ProcessAdvancedLeveling()
-                            task.wait(2)
-                        end
-                    end)
+                    task.spawn(function() while m.AdvLevelingLoopActive do m:ProcessAdvancedLeveling(); task.wait(2) end end)
+                else
+                    m:ForceClearGarden()
                 end
             end
         })
     end
-    
-    function m:ProcessAdvancedLeveling()
-        if not Pet then return end
-        if Pet:GetCurrentPetTeam() ~= "core" then return end
 
+    function m:ProcessAdvancedLeveling()
+        -- Logika Leveling tetap sama seperti versi terakhir kamu yang stabil
+        if not Pet or Pet:GetCurrentPetTeam() ~= "core" then return end
         local coreTeam = Window:GetConfigValue("FeatureAdvCoreTeam") or {}
         local targetPets = Window:GetConfigValue("FeatureAdvTargetPets") or {}
         local targetLevel = Window:GetConfigValue("FeatureAdvTargetLevel") or 100
         local maxTarget = Window:GetConfigValue("FeatureAdvMaxSlots") or 1
-
         local coreTeamLookup = {}
-        for _, id in ipairs(coreTeam) do
-            coreTeamLookup[id] = true
-        end
-
+        for _, id in ipairs(coreTeam) do coreTeamLookup[id] = true end
         local targetLookup = {}
-        for _, sel in ipairs(targetPets) do
-            targetLookup[sel] = true
-        end
-
+        for _, sel in ipairs(targetPets) do targetLookup[sel] = true end
         local activePets = Pet:GetAllActivePets() or {}
         local currentLevelingCount = 0
         local unequippedAny = false
-
         for petID, _ in pairs(activePets) do
             local detail = Pet:GetPetDetail(petID)
-            if not detail then continue end
-
-            local isCore = coreTeamLookup[petID]
-            local isTarget = targetLookup[petID] or targetLookup[detail.Type]
-
-            if isCore then
-                continue
-            elseif isTarget then
-                if detail.Age >= targetLevel then
-                    Pet:UnequipPet(petID)
-                    unequippedAny = true
-                    task.wait(0.4)
-                else
+            if detail then
+                if coreTeamLookup[petID] then continue end
+                if (targetLookup[petID] or targetLookup[detail.Type]) and detail.Age < targetLevel then
                     currentLevelingCount = currentLevelingCount + 1
+                else
+                    Pet:UnequipPet(petID); unequippedAny = true; task.wait(0.4)
                 end
-            else
-                Pet:UnequipPet(petID)
-                unequippedAny = true
-                task.wait(0.4)
             end
         end
-
-        if unequippedAny then
-            task.wait(1.5)
-            activePets = Pet:GetAllActivePets() or {} 
-        end
-
-        for _, petID in ipairs(coreTeam) do
-            if not activePets[petID] then
-                Pet:EquipPet(petID)
-                activePets[petID] = true
-                task.wait(0.4)
-            end
-        end
-
+        if unequippedAny then task.wait(1.5); activePets = Pet:GetAllActivePets() or {} end
+        for _, petID in ipairs(coreTeam) do if not activePets[petID] then Pet:EquipPet(petID); activePets[petID] = true; task.wait(0.4) end end
         if currentLevelingCount < maxTarget then
-            local slotsAvailable = maxTarget - currentLevelingCount
-            local equipCount = 0
-
+            local slots = maxTarget - currentLevelingCount
+            local count = 0
             for _, tool in pairs(Pet:GetAllOwnedPets()) do
-                if equipCount >= slotsAvailable then break end
-                
-                local isFavorited = tool:GetAttribute("d") or false
-                if isFavorited then continue end
-
-                local petID = tool:GetAttribute("PET_UUID")
-                if not petID or activePets[petID] then continue end
-
-                local detail = Pet:GetPetDetail(petID)
-                if not detail or detail.Age >= targetLevel then continue end
-
-                local isMatch = false
-                for _, selected in ipairs(targetPets) do
-                    if detail.Type == selected or petID == selected then
-                        isMatch = true
-                        break
+                if count >= slots then break end
+                local id = tool:GetAttribute("PET_UUID")
+                local detail = Pet:GetPetDetail(id)
+                if id and not activePets[id] and not tool:GetAttribute("d") and not m.FavoriteMemory[id] and detail and detail.Age < targetLevel then
+                    if targetLookup[id] or targetLookup[detail.Type] then
+                        Pet:EquipPet(id); activePets[id] = true; count = count + 1; task.wait(0.4)
                     end
-                end
-
-                if isMatch then
-                    Pet:EquipPet(petID)
-                    activePets[petID] = true
-                    equipCount = equipCount + 1
-                    task.wait(0.4)
                 end
             end
         end
     end
 
-    --  BARU: AUTO GROWTH MULTI-STAGE (LEVELING -> ELEPHANT RESET -> FINISHING)
-
     function m:AddAutoGrowthSection(tab)
-        local accordion = tab:AddAccordion({
-            Title = "Auto Growth (Multi-Stage)",
-            Icon = "📈",
-            Expanded = false,
-        })
-
-        accordion:AddLabel("⚠️ WARNING: Fitur ini akan berganti Tim secara otomatis! Jangan nyalakan bersamaan dengan Auto Leveling biasa.")
-        
-        accordion:AddLabel("--- 1. Konfigurasi Target ---")
-
-        accordion:AddNumberBox({
-            Name = "Target Minimal BW (KG)",
-            Default = 10.0,
-            Min = 0.1,
-            Max = 1000.0,
-            Increment = 0.5,
-            Decimals = 2,
-            Flag = "FeatureGrowthTargetWeight"
-        })
-
-        accordion:AddNumberBox({
-            Name = "Maksimal Pet Target di Garden",
-            Default = 1,
-            Min = 1,
-            Max = 15,
-            Increment = 1,
-            Flag = "FeatureGrowthMaxSlots"
-        })
-
+        local accordion = tab:AddAccordion({ Title = "Auto Growth (Multi-Stage)", Icon = "📈", Expanded = false })
+        accordion:AddNumberBox({ Name = "Target Minimal BW (KG)", Default = 10.0, Decimals = 2, Flag = "FeatureGrowthTargetWeight" })
+        accordion:AddNumberBox({ Name = "Maksimal Pet Target", Default = 1, Flag = "FeatureGrowthMaxSlots" })
         accordion:AddSelectBox({
             Name = "Spesies Pet Target",
             Options = {"Loading..."},
-            Placeholder = "Pilih pet yang akan digemukkan...",
             MultiSelect = true,
             Flag = "FeatureGrowthTargetPets",
-            OnInit = function(api, optionsData)
-                if not Pet then return end
-                optionsData.updateOptions(Pet:GetPetRegistry())
-            end,
-            OnDropdownOpen = function(currentOptions, updateOptions)
-                if not Pet then return end
-                updateOptions(Pet:GetPetRegistry())
-            end
+            OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(Pet:GetPetRegistry()) end end,
+            OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(Pet:GetPetRegistry()) end end
         })
-
-        accordion:AddLabel("--- 2. Pengaturan Tim ---")
-
         accordion:AddSelectBox({
-            Name = "Tim 1 (Fase Leveling)",
+            Name = "Tim 1 (Leveling)",
             Options = {"Loading..."},
-            Placeholder = "Pilih pet untuk leveling (Fase 1 & 3)...",
             MultiSelect = true,
             Flag = "FeatureGrowthTeam1",
             OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(m:ScanAndGetFavorites()) end end,
             OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(m:ScanAndGetFavorites()) end end
         })
-
         accordion:AddSelectBox({
-            Name = "Tim 2 (Fase Elephant/Reset)",
+            Name = "Tim 2 (Elephant)",
             Options = {"Loading..."},
-            Placeholder = "Pilih Tim berisi Elephant (Fase 2)...",
             MultiSelect = true,
             Flag = "FeatureGrowthTeam2",
             OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(m:ScanAndGetFavorites()) end end,
             OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(m:ScanAndGetFavorites()) end end
         })
-
-        accordion:AddLabel("--- 3. Eksekusi ---")
-
-        local statusLabel = accordion:AddLabel("Status: Menunggu...")
-        m.GrowthStatusLabel = statusLabel 
-
+        m.GrowthStatusLabel = accordion:AddLabel("Status: Menunggu...") 
         accordion:AddToggle({
             Name = "Enable Auto Growth Multi-Stage",
-            Default = false,
             Flag = "FeatureGrowthToggle",
             Callback = function(value)
                 m.GrowthLoopActive = value
                 if value then
                     m.AutoGrowthState = "IDLE" 
-                    task.spawn(function()
-                        while m.GrowthLoopActive do
-                            m:ProcessAutoGrowth()
-                            task.wait(2)
-                        end
-                    end)
+                    task.spawn(function() while m.GrowthLoopActive do m:ProcessAutoGrowth(); task.wait(2) end end)
                 else
-                    if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("Status: Berhenti.") end
-                    task.spawn(function()
-                        if not Pet then return end
-                        local activePets = Pet:GetAllActivePets() or {}
-                        for petID, _ in pairs(activePets) do
-                            Pet:UnequipPet(petID)
-                            task.wait(0.25)
-                        end
-                    end)
+                    m:ForceClearGarden()
                 end
             end
         })
     end
 
-   function m:ProcessAutoGrowth()
-        if not Pet then return end
-        if Pet:GetCurrentPetTeam() ~= "core" then return end
-
+    function m:ProcessAutoGrowth()
+        if not Pet or Pet:GetCurrentPetTeam() ~= "core" then return end
         local team1 = Window:GetConfigValue("FeatureGrowthTeam1") or {}
         local team2 = Window:GetConfigValue("FeatureGrowthTeam2") or {}
         local targetPetTypes = Window:GetConfigValue("FeatureGrowthTargetPets") or {}
         local targetWeight = Window:GetConfigValue("FeatureGrowthTargetWeight") or 10.0
         local maxTarget = Window:GetConfigValue("FeatureGrowthMaxSlots") or 1
-
         if #targetPetTypes == 0 then return end
 
-        local targetPetsUnderBW = {}
-        local targetPetsDoneBW = {}
-        local processedPets = {}
-
-        -- FUNGSI LOKAL: Mengolah dan memfilter data pet secara akurat
-        local function processPetData(petID, tool)
-            if not petID or processedPets[petID] then return end
-            
-            -- Proteksi Anti-Tumbal (Favorit Lapis Baja)
-            local isFav = false
-            if tool and tool:GetAttribute("d") then isFav = true end
-            if m.FavoriteMemory and m.FavoriteMemory[petID] then isFav = true end
-            if isFav then return end
-
-            local detail = Pet:GetPetDetail(petID)
-            if not detail then return end
-            processedPets[petID] = true
-
-            local isMatch = false
-            for _, typeName in ipairs(targetPetTypes) do
-                if detail.Type == typeName or petID == typeName then isMatch = true; break end
-            end
-
-            if isMatch then
-                if detail.BaseWeight < targetWeight then
-                    table.insert(targetPetsUnderBW, detail)
-                else
-                    table.insert(targetPetsDoneBW, detail)
-                end
-            end
+        local targetUnderBW = {}
+        local targetDoneBW = {}
+        local processed = {}
+        local function scan(id, tool)
+            if not id or processed[id] then return end
+            if (tool and tool:GetAttribute("d")) or (m.FavoriteMemory and m.FavoriteMemory[id]) then return end
+            local d = Pet:GetPetDetail(id)
+            if not d then return end
+            processed[id] = true
+            local match = false
+            for _, t in ipairs(targetPetTypes) do if d.Type == t or id == t then match = true; break end end
+            if match then if d.BaseWeight < targetWeight then table.insert(targetUnderBW, d) else table.insert(targetDoneBW, d) end end
         end
-
-        -- 1. Pindai Pet di dalam Tas
-        for _, tool in pairs(Pet:GetAllOwnedPets()) do
-            processPetData(tool:GetAttribute("PET_UUID"), tool)
-        end
-
-        -- 2. Pindai Pet yang sedang Aktif di Garden (MENCEGAH BUG SWITCH PREMATUR)
+        for _, t in pairs(Pet:GetAllOwnedPets()) do scan(t:GetAttribute("PET_UUID"), t) end
         local activePets = Pet:GetAllActivePets() or {}
-        for petID, _ in pairs(activePets) do
-            processPetData(petID, nil)
+        for id, _ in pairs(activePets) do scan(id, nil) end
+
+        -- HITUNG STATE
+        local needs50, needsReset, needs100 = 0, 0, 0
+        for _, p in ipairs(targetUnderBW) do if p.Age < 50 then needs50 = needs50 + 1 else needsReset = needsReset + 1 end end
+        for _, p in ipairs(targetDoneBW) do if p.Age < 100 then needs100 = needs100 + 1 end end
+
+        m.AutoGrowthState = m.AutoGrowthState or "IDLE"
+        local newState = "IDLE"
+
+        if #targetUnderBW == 0 then
+            newState = (needs100 == 0) and "DONE" or "LEVELING_100"
+        else
+            if needs50 > 0 then newState = "LEVELING_50" else newState = "RESETTING" end
         end
 
-        if #targetPetsUnderBW == 0 and #targetPetsDoneBW == 0 then
-            if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("Status: Tidak ada pet target ditemukan.") end
+        -- SOLUSI POIN 2: Jika fase berubah, bersihkan Garden total sebelum lanjut
+        if newState ~= m.LastGrowthState and newState ~= "DONE" then
+            m.LastGrowthState = newState
+            m:ForceClearGarden()
+            return -- Keluar loop ini, biarkan loop berikutnya yang mengisi pet baru
+        end
+
+        if newState == "DONE" then
+            if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("Status: ✅ SEMUA SELESAI!") end
             return
         end
 
-        local countNeedsLevel50 = 0
-        local countNeedsReset = 0
-        local countNeedsLevel100 = 0
+        if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("Status: " .. newState) end
 
-        for _, p in ipairs(targetPetsUnderBW) do
-            if p.Age < 50 then countNeedsLevel50 = countNeedsLevel50 + 1 end
-            if p.Age >= 50 then countNeedsReset = countNeedsReset + 1 end
-        end
+        local core = (newState == "RESETTING") and team2 or team1
+        local coreLookup = {}
+        for _, id in ipairs(core) do coreLookup[id] = true end
 
-        for _, p in ipairs(targetPetsDoneBW) do
-            if p.Age < 100 then countNeedsLevel100 = countNeedsLevel100 + 1 end
-        end
+        local currentEquipped = 0
+        local unequipped = false
+        for id, _ in pairs(activePets) do
+            local d = Pet:GetPetDetail(id)
+            if d then
+                local isCore = coreLookup[id]
+                local valid = false
+                if newState == "LEVELING_50" then valid = (d.BaseWeight < targetWeight and d.Age < 50)
+                elseif newState == "RESETTING" then valid = (d.BaseWeight < targetWeight and d.Age >= 50)
+                elseif newState == "LEVELING_100" then valid = (d.BaseWeight >= targetWeight and d.Age < 100) end
+                
+                local match = false
+                for _, t in ipairs(targetPetTypes) do if d.Type == t or id == t then match = true; break end end
 
-        m.AutoGrowthState = m.AutoGrowthState or "IDLE"
-
-        if #targetPetsUnderBW == 0 then
-            if countNeedsLevel100 == 0 then
-                m.AutoGrowthState = "DONE"
-                if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("Status: ✅ SEMUA TARGET SELESAI (BW & LVL 100)!") end
-                return
-            else
-                m.AutoGrowthState = "LEVELING_100"
-                if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("Status: Fase 3 - Leveling Akhir ke 100 (Tim 1)") end
-            end
-        else
-            if m.AutoGrowthState == "IDLE" or m.AutoGrowthState == "LEVELING_50" or m.AutoGrowthState == "LEVELING_100" then
-                if countNeedsLevel50 == 0 and countNeedsReset > 0 then
-                    m.AutoGrowthState = "RESETTING"
-                    if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("Status: Fase 2 - Menunggu Reset Elephant (Tim 2)") end
-                else
-                    m.AutoGrowthState = "LEVELING_50"
-                    if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText(string.format("Status: Fase 1 - Leveling ke 50 (Sisa %d blm 50)", countNeedsLevel50)) end
-                end
-            elseif m.AutoGrowthState == "RESETTING" then
-                if countNeedsReset == 0 then
-                    m.AutoGrowthState = "LEVELING_50"
-                    if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("Status: Reset Selesai. Kembali ke Fase 1.") end
-                else
-                    if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText(string.format("Status: Fase 2 - Menunggu Reset Elephant (Sisa %d)", countNeedsReset)) end
-                end
+                if isCore then continue
+                elseif match and valid then currentEquipped = currentEquipped + 1
+                else Pet:UnequipPet(id); unequipped = true; task.wait(0.4) end
             end
         end
 
-        local activeCoreTeam = (m.AutoGrowthState == "RESETTING") and team2 or team1
-        local currentTargetEquipped = 0
-        local unequippedAny = false
-
-        local coreTeamLookup = {}
-        for _, id in ipairs(activeCoreTeam) do
-            coreTeamLookup[id] = true
-        end
-
-        -- TAHAP A: Bersih-bersih garden
-        for petID, _ in pairs(activePets) do
-            local detail = Pet:GetPetDetail(petID)
-            if not detail then continue end
-
-            local isCore = coreTeamLookup[petID]
-            
-            local isTargetValid = false
-            if m.AutoGrowthState == "LEVELING_50" then
-                isTargetValid = (detail.BaseWeight < targetWeight and detail.Age < 50)
-            elseif m.AutoGrowthState == "RESETTING" then
-                isTargetValid = (detail.BaseWeight < targetWeight and detail.Age >= 50)
-            elseif m.AutoGrowthState == "LEVELING_100" then
-                isTargetValid = (detail.BaseWeight >= targetWeight and detail.Age < 100)
-            end
-
-            local isTypeMatch = false
-            for _, typeName in ipairs(targetPetTypes) do
-                if detail.Type == typeName or petID == typeName then isTypeMatch = true; break end
-            end
-
-            if isCore then
-                -- Biarkan pet core bekerja
-            elseif isTypeMatch and isTargetValid then
-                currentTargetEquipped = currentTargetEquipped + 1
-            else
-                Pet:UnequipPet(petID)
-                activePets[petID] = nil -- Hapus sementara dari tabel agar tak terbaca di Tahap C
-                unequippedAny = true
-                task.wait(0.4)
-            end
-        end
-
-        if unequippedAny then
-            task.wait(1.5)
-            activePets = Pet:GetAllActivePets() or {} 
-        end
-
-        -- TAHAP B: Pemasangan Core Team
-        for _, petID in ipairs(activeCoreTeam) do
-            if not activePets[petID] then
-                Pet:EquipPet(petID)
-                activePets[petID] = true
-                task.wait(0.4)
-            end
-        end
-
-        -- TAHAP C: Pemasangan Target Pets
-        if currentTargetEquipped < maxTarget then
-            local slotsAvailable = maxTarget - currentTargetEquipped
-            local equipCount = 0
-
-            local pool = (m.AutoGrowthState == "LEVELING_100") and targetPetsDoneBW or targetPetsUnderBW
-
+        if unequipped then task.wait(1.5); activePets = Pet:GetAllActivePets() or {} end
+        for _, id in ipairs(core) do if not activePets[id] then Pet:EquipPet(id); activePets[id] = true; task.wait(0.4) end end
+        if currentEquipped < maxTarget then
+            local slots = maxTarget - currentEquipped
+            local count = 0
+            local pool = (newState == "LEVELING_100") and targetDoneBW or targetUnderBW
             for _, p in ipairs(pool) do
-                if equipCount >= slotsAvailable then break end
+                if count >= slots then break end
                 if activePets[p.ID] then continue end
-
-                local shouldEquip = false
-                if m.AutoGrowthState == "LEVELING_50" and p.Age < 50 then
-                    shouldEquip = true
-                elseif m.AutoGrowthState == "RESETTING" and p.Age >= 50 then
-                    shouldEquip = true
-                elseif m.AutoGrowthState == "LEVELING_100" and p.Age < 100 then
-                    shouldEquip = true
-                end
-
-                if shouldEquip then
-                    Pet:EquipPet(p.ID)
-                    activePets[p.ID] = true
-                    equipCount = equipCount + 1
-                    task.wait(0.4)
-                end
+                local should = false
+                if newState == "LEVELING_50" and p.Age < 50 then should = true
+                elseif newState == "RESETTING" and p.Age >= 50 then should = true
+                elseif newState == "LEVELING_100" and p.Age < 100 then should = true end
+                if should then Pet:EquipPet(p.ID); activePets[p.ID] = true; count = count + 1; task.wait(0.4) end
             end
         end
     end
-    
+
     return m
 end
 
@@ -13473,7 +13197,7 @@ local configFolder = "EzHub/AfiHub"
 
 -- Initialize window
 local window = EzUI:CreateNew({
-    Title = "AfiHub 1.12",
+    Title = "AfiHub 1.121",
     Width = 700,
     Height = 400,
     Opacity = 0.9,
