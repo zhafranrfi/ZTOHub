@@ -273,6 +273,7 @@ EmbeddedModules["feature/ui.lua"] = function()
     local Window
     local Core
     local Pet
+    local HttpService = game:GetService("HttpService")
 
     function m:Init(_window, _core, _pet)
         Window = _window
@@ -282,6 +283,8 @@ EmbeddedModules["feature/ui.lua"] = function()
         m.AdvLevelingLoopActive = false
         m.GrowthLoopActive = false
         m.LastGrowthState = "IDLE" 
+        m.WebhookNotifiedPets = {} -- Memori Anti-Spam Webhook
+        
         m:CreateFeatureTab()
 
         task.spawn(function()
@@ -348,6 +351,42 @@ EmbeddedModules["feature/ui.lua"] = function()
         end
         
         if count > 0 then task.wait(2) end 
+    end
+
+    -- FUNGSI BARU: Mengirim Webhook ke Discord
+    function m:SendWebhook(url, petType, petBW, targetWeight)
+        local httpRequest = request or http_request or (http and http.request) or (syn and syn.request)
+        if not httpRequest then 
+            print("Executor tidak mendukung HTTP Request untuk Webhook.")
+            return 
+        end
+
+        local data = {
+            embeds = {{
+                title = "🎉 A Pet has reached the Target Weight!",
+                color = tonumber("0x00FF7F"), -- Warna hijau cerah
+                fields = {
+                    {name = "🐾 Pet Type", value = tostring(petType), inline = true},
+                    {name = "⚖️ Current Weight", value = tostring(petBW) .. " KG", inline = true},
+                    {name = "🎯 Target Weight", value = tostring(targetWeight) .. " KG", inline = true}
+                },
+                footer = {text = "Auto Growth System • Multi-Stage"},
+                timestamp = DateTime.now():ToIsoDate()
+            }}
+        }
+
+        local jsonData = HttpService:JSONEncode(data)
+
+        task.spawn(function()
+            pcall(function()
+                httpRequest({
+                    Url = url,
+                    Method = "POST",
+                    Headers = {["Content-Type"] = "application/json"},
+                    Body = jsonData
+                })
+            end)
+        end)
     end
 
     function m:AddTestFavoriteSection(tab)
@@ -420,8 +459,6 @@ EmbeddedModules["feature/ui.lua"] = function()
         if not Pet or Pet:GetCurrentPetTeam() ~= "core" then return end
         local coreTeam = Window:GetConfigValue("FeatureAdvCoreTeam") or {}
         local targetPets = Window:GetConfigValue("FeatureAdvTargetPets") or {}
-        
-        -- KONVERSI MUTLAK KE NUMBER
         local targetLevel = tonumber(Window:GetConfigValue("FeatureAdvTargetLevel")) or 100
         local maxTarget = tonumber(Window:GetConfigValue("FeatureAdvMaxSlots")) or 1
         
@@ -441,7 +478,7 @@ EmbeddedModules["feature/ui.lua"] = function()
                 if coreTeamLookup[petID] then continue end
                 
                 local petType = detail.Type or ""
-                local petAge = tonumber(detail.Age) or 0 -- KONVERSI MUTLAK
+                local petAge = tonumber(detail.Age) or 0 
                 
                 if (targetLookup[petID] or targetLookup[petType]) and petAge < targetLevel then
                     currentLevelingCount = currentLevelingCount + 1
@@ -470,7 +507,7 @@ EmbeddedModules["feature/ui.lua"] = function()
                 local detail = Pet:GetPetDetail(id)
                 if detail and not activePets[id] and not tool:GetAttribute("d") and not m.FavoriteMemory[id] then
                     local petType = detail.Type or ""
-                    local petAge = tonumber(detail.Age) or 0 -- KONVERSI MUTLAK
+                    local petAge = tonumber(detail.Age) or 0 
                     
                     if petAge < targetLevel and (targetLookup[id] or targetLookup[petType]) then
                         Pet:EquipPet(id); activePets[id] = true; count = count + 1; task.wait(0.4)
@@ -482,6 +519,9 @@ EmbeddedModules["feature/ui.lua"] = function()
 
     function m:AddAutoGrowthSection(tab)
         local accordion = tab:AddAccordion({ Title = "Auto Growth (Multi-Stage)", Icon = "📈", Expanded = false })
+        
+        -- Konfigurasi Dasar
+        accordion:AddLabel("--- 1. Konfigurasi ---")
         accordion:AddNumberBox({ Name = "Target Minimal BW (KG)", Default = 10.0, Decimals = 2, Flag = "FeatureGrowthTargetWeight" })
         accordion:AddNumberBox({ Name = "Maksimal Pet Target", Default = 1, Flag = "FeatureGrowthMaxSlots" })
         accordion:AddSelectBox({
@@ -492,6 +532,7 @@ EmbeddedModules["feature/ui.lua"] = function()
             OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(Pet:GetPetRegistry()) end end,
             OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(Pet:GetPetRegistry()) end end
         })
+
         accordion:AddSelectBox({
             Name = "Tim 1 (Leveling)",
             Options = {"Loading..."},
@@ -508,7 +549,30 @@ EmbeddedModules["feature/ui.lua"] = function()
             OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(m:ScanAndGetFavorites()) end end,
             OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(m:ScanAndGetFavorites()) end end
         })
-        m.GrowthStatusLabel = accordion:AddLabel("Status: Menunggu...") 
+
+        -- Webhook Section
+        accordion:AddLabel("--- 2. Webhook Notification ---")
+        accordion:AddTextBox({
+            Name = "Discord Webhook URL",
+            Default = "",
+            Placeholder = "https://discord.com/api/webhooks/...",
+            Flag = "FeatureGrowthWebhookUrl"
+        })
+        accordion:AddToggle({
+            Name = "Enable Discord Notification",
+            Default = false,
+            Flag = "FeatureGrowthWebhookToggle"
+        })
+
+        -- Live Dashboard / Panel Section
+        accordion:AddLabel("--- 3. Live Dashboard ---")
+        m.LabelTeam1 = accordion:AddLabel("👥 Tim 1 (Leveling) : Menunggu...")
+        m.LabelTeam2 = accordion:AddLabel("🐘 Tim 2 (Elephant) : Menunggu...")
+        m.LabelTargetTotal = accordion:AddLabel("📦 Total Pet Target : Menunggu...")
+        m.LabelTargetDone = accordion:AddLabel("✅ Selesai (Sesuai BW): Menunggu...")
+        m.GrowthStatusLabel = accordion:AddLabel("⚙️ Status: Menunggu...") 
+
+        accordion:AddLabel("--- 4. Eksekusi ---")
         accordion:AddToggle({
             Name = "Enable Auto Growth Multi-Stage",
             Flag = "FeatureGrowthToggle",
@@ -529,11 +593,13 @@ EmbeddedModules["feature/ui.lua"] = function()
         local team1 = Window:GetConfigValue("FeatureGrowthTeam1") or {}
         local team2 = Window:GetConfigValue("FeatureGrowthTeam2") or {}
         local targetPetTypes = Window:GetConfigValue("FeatureGrowthTargetPets") or {}
-        
-        -- KONVERSI MUTLAK KE NUMBER
         local targetWeight = tonumber(Window:GetConfigValue("FeatureGrowthTargetWeight")) or 10.0
         local maxTarget = tonumber(Window:GetConfigValue("FeatureGrowthMaxSlots")) or 1
         
+        -- UPDATE PANEL UI: Team Counts
+        if m.LabelTeam1 then m.LabelTeam1:SetText("👥 Tim 1 (Leveling) : " .. #team1 .. " Pet") end
+        if m.LabelTeam2 then m.LabelTeam2:SetText("🐘 Tim 2 (Elephant) : " .. #team2 .. " Pet") end
+
         if #targetPetTypes == 0 then return end
 
         local targetUnderBW = {}
@@ -549,7 +615,7 @@ EmbeddedModules["feature/ui.lua"] = function()
             processed[id] = true
             
             local petType = d.Type or ""
-            local petBW = tonumber(d.BaseWeight) or 0 -- KONVERSI MUTLAK
+            local petBW = tonumber(d.BaseWeight) or 0 
             
             local match = false
             for _, t in ipairs(targetPetTypes) do 
@@ -569,13 +635,35 @@ EmbeddedModules["feature/ui.lua"] = function()
         local activePets = Pet:GetAllActivePets() or {}
         for id, _ in pairs(activePets) do scan(id, nil) end
 
+        -- UPDATE PANEL UI: Target Counts
+        local totalTargets = #targetUnderBW + #targetDoneBW
+        if m.LabelTargetTotal then m.LabelTargetTotal:SetText("📦 Total Pet Target : " .. totalTargets .. " Pet") end
+        if m.LabelTargetDone then m.LabelTargetDone:SetText("✅ Selesai (Sesuai BW): " .. #targetDoneBW .. " Pet") end
+
+        -- WEBHOOK LOGIC: Cek jika ada yang baru selesai
+        local webhookEnabled = Window:GetConfigValue("FeatureGrowthWebhookToggle")
+        local webhookUrl = Window:GetConfigValue("FeatureGrowthWebhookUrl")
+
+        if webhookEnabled and webhookUrl and webhookUrl ~= "" then
+            m.WebhookNotifiedPets = m.WebhookNotifiedPets or {}
+            for _, p in ipairs(targetDoneBW) do
+                local pID = p.ID
+                if not m.WebhookNotifiedPets[pID] then
+                    m.WebhookNotifiedPets[pID] = true -- Tandai agar tidak di-spam
+                    local petType = p.Type or "Unknown"
+                    local petBW = tonumber(p.BaseWeight) or 0
+                    m:SendWebhook(webhookUrl, petType, petBW, targetWeight)
+                end
+            end
+        end
+
         local needs50, needsReset, needs100 = 0, 0, 0
         for _, p in ipairs(targetUnderBW) do 
-            local age = tonumber(p.Age) or 0 -- KONVERSI MUTLAK
+            local age = tonumber(p.Age) or 0 
             if age < 50 then needs50 = needs50 + 1 else needsReset = needsReset + 1 end 
         end
         for _, p in ipairs(targetDoneBW) do 
-            local age = tonumber(p.Age) or 0 -- KONVERSI MUTLAK
+            local age = tonumber(p.Age) or 0 
             if age < 100 then needs100 = needs100 + 1 end 
         end
 
@@ -595,11 +683,11 @@ EmbeddedModules["feature/ui.lua"] = function()
         end
 
         if newState == "DONE" then
-            if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("Status: ✅ SEMUA SELESAI!") end
+            if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("⚙️ Status: ✅ SEMUA SELESAI!") end
             return
         end
 
-        if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("Status: " .. newState) end
+        if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("⚙️ Status: " .. newState) end
 
         local core = (newState == "RESETTING") and team2 or team1
         local coreLookup = {}
@@ -613,8 +701,8 @@ EmbeddedModules["feature/ui.lua"] = function()
                 local isCore = coreLookup[id]
                 local valid = false
                 
-                local petAge = tonumber(d.Age) or 0 -- KONVERSI MUTLAK
-                local petBW = tonumber(d.BaseWeight) or 0 -- KONVERSI MUTLAK
+                local petAge = tonumber(d.Age) or 0 
+                local petBW = tonumber(d.BaseWeight) or 0 
                 local petType = d.Type or ""
                 
                 if newState == "LEVELING_50" then valid = (petBW < targetWeight and petAge < 50)
@@ -646,7 +734,7 @@ EmbeddedModules["feature/ui.lua"] = function()
                 if activePets[p.ID] then continue end
                 
                 local should = false
-                local petAge = tonumber(p.Age) or 0 -- KONVERSI MUTLAK
+                local petAge = tonumber(p.Age) or 0 
                 
                 if newState == "LEVELING_50" and petAge < 50 then should = true
                 elseif newState == "RESETTING" and petAge >= 50 then should = true
@@ -659,6 +747,7 @@ EmbeddedModules["feature/ui.lua"] = function()
 
     return m
 end
+
 
 -- Module: quest/season_pass.lua
 EmbeddedModules["quest/season_pass.lua"] = function()
@@ -13253,7 +13342,7 @@ local configFolder = "EzHub/AfiHub"
 
 -- Initialize window
 local window = EzUI:CreateNew({
-    Title = "AfiHub 1.121.1",
+    Title = "AfiHub 1.121.2",
     Width = 700,
     Height = 400,
     Opacity = 0.9,
