@@ -282,14 +282,12 @@ EmbeddedModules["feature/ui.lua"] = function()
 
         m.AdvLevelingLoopActive = false
         m.GrowthLoopActive = false
-        m.LastGrowthState = "IDLE" 
+        m.AutoGrowthState = "IDLE" 
         m.WebhookNotifiedPets = {} 
         
-        -- MENCIPTAKAN DUA TAB SEKALIGUS
         m:CreateFeatureTab()
         m:CreateMiscTab()
 
-        -- ENGINE UTAMA: Berjalan terus-menerus untuk Real-time Dashboard & Eksekusi
         task.spawn(function()
             task.wait(3) 
             while true do
@@ -322,9 +320,6 @@ EmbeddedModules["feature/ui.lua"] = function()
         m:AddTestFavoriteSection(tab)
     end
 
-    -- ================================================================= --
-    -- TAB BARU: MISC (UNTUK WEBHOOK & SETTING LAINNYA)
-    -- ================================================================= --
     function m:CreateMiscTab()
         local tab = Window:AddTab({
             Name = "Misc",
@@ -353,9 +348,6 @@ EmbeddedModules["feature/ui.lua"] = function()
         })
     end
 
-    -- ================================================================= --
-    -- LOGIKA REAL-TIME DASHBOARD
-    -- ================================================================= --
     function m:UpdateGrowthDashboard()
         if not Pet then return end
 
@@ -404,9 +396,6 @@ EmbeddedModules["feature/ui.lua"] = function()
         if m.LabelTargetDone then m.LabelTargetDone:SetText("✅ Sesuai BW : " .. targetDoneBW .. " Pet") end
     end
 
-    -- ================================================================= --
-    -- FUNGSI WEBHOOK & UTILITAS
-    -- ================================================================= --
     function m:SendWebhook(petType, petBW, targetWeight)
         local url = Window:GetConfigValue("GlobalWebhookUrl")
         local enabled = Window:GetConfigValue("GlobalWebhookToggle")
@@ -474,9 +463,6 @@ EmbeddedModules["feature/ui.lua"] = function()
         task.wait(1)
     end
 
-    -- ================================================================= --
-    -- MENU SECTIONS
-    -- ================================================================= --
     function m:AddPetTeamsManagementSection(tab)
         local accordion = tab:AddAccordion({ Title = "Pet Teams Management", Icon = "🛠️", Expanded = false })
         accordion:AddSelectBox({
@@ -575,9 +561,6 @@ EmbeddedModules["feature/ui.lua"] = function()
         })
     end
 
-    -- ================================================================= --
-    -- LOGIKA EKSEKUSI (Hanya Menjalankan Perintah Garden)
-    -- ================================================================= --
     function m:ProcessAdvancedLeveling()
         if not Pet or Pet:GetCurrentPetTeam() ~= "core" then return end
         local coreTeam = Window:GetConfigValue("FeatureAdvCoreTeam") or {}
@@ -665,14 +648,36 @@ EmbeddedModules["feature/ui.lua"] = function()
         for _, p in ipairs(targetUnderBW) do if (tonumber(p.Age) or 0) < 50 then n50 = n50 + 1 else nReset = nReset + 1 end end
         for _, p in ipairs(targetDoneBW) do if (tonumber(p.Age) or 0) < 100 then n100 = n100 + 1 end end
 
-        local newState = "IDLE"
-        if #targetUnderBW == 0 then newState = (n100 == 0) and "DONE" or "LEVELING_100"
-        else newState = (n50 > 0) and "LEVELING_50" or "RESETTING" end
+        m.AutoGrowthState = m.AutoGrowthState or "IDLE"
+        local newState = m.AutoGrowthState
 
-        if newState ~= m.LastGrowthState and newState ~= "DONE" then
-            m.LastGrowthState = newState
-            m:ForceClearGarden()
-            return 
+        -- LOGIKA PENGUNCI FASE (BATCH PROCESSING)
+        if #targetUnderBW == 0 then
+            newState = (n100 == 0) and "DONE" or "LEVELING_100"
+        else
+            if m.AutoGrowthState == "IDLE" or m.AutoGrowthState == "LEVELING_50" or m.AutoGrowthState == "LEVELING_100" or m.AutoGrowthState == "DONE" then
+                if n50 == 0 and nReset > 0 then
+                    newState = "RESETTING"
+                else
+                    newState = "LEVELING_50"
+                end
+            elseif m.AutoGrowthState == "RESETTING" then
+                -- HYSTERESIS: Kunci di fase Reset sampai SEMUA pet level 50+ habis direset
+                if nReset == 0 then
+                    newState = "LEVELING_50"
+                else
+                    newState = "RESETTING"
+                end
+            end
+        end
+
+        -- EKSEKUSI PERGANTIAN FASE
+        if newState ~= m.AutoGrowthState then
+            m.AutoGrowthState = newState
+            if newState ~= "DONE" then
+                m:ForceClearGarden()
+                return 
+            end
         end
 
         if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("⚙️ Status: " .. newState) end
@@ -738,7 +743,6 @@ EmbeddedModules["feature/ui.lua"] = function()
 
     return m
 end
-
 
 -- Module: quest/season_pass.lua
 EmbeddedModules["quest/season_pass.lua"] = function()
@@ -13333,7 +13337,7 @@ local configFolder = "EzHub/AfiHub"
 
 -- Initialize window
 local window = EzUI:CreateNew({
-    Title = "AfiHub 1.121.3",
+    Title = "AfiHub 1.121.5",
     Width = 700,
     Height = 400,
     Opacity = 0.9,
