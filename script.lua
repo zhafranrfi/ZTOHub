@@ -289,7 +289,7 @@ EmbeddedModules["feature/ui.lua"] = function()
         m:CreateMiscTab()
 
         task.spawn(function()
-            task.wait(3) 
+            task.wait(4) -- Waktu tunggu ekstra agar data game sinkron sebelum loop dimulai
             while true do
                 if m.LabelTargetTotal then
                     m:UpdateGrowthDashboard()
@@ -456,11 +456,13 @@ EmbeddedModules["feature/ui.lua"] = function()
         if not Pet then return end
         if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("⚙️ Status: 🧹 Membersihkan Garden...") end
         local activePets = Pet:GetAllActivePets() or {}
+        local isCleared = false
         for petID, _ in pairs(activePets) do
             Pet:UnequipPet(petID)
+            isCleared = true
             task.wait(0.2)
         end
-        task.wait(1)
+        if isCleared then task.wait(2) end -- Jeda lebih lama agar server terjamin bersih
     end
 
     function m:AddPetTeamsManagementSection(tab)
@@ -586,6 +588,9 @@ EmbeddedModules["feature/ui.lua"] = function()
                 else
                     Pet:UnequipPet(id); unequipped = true; task.wait(0.4)
                 end
+            else
+                -- BUG FIX: Tarik Paksa jika data pet terbaca nil (Nyangkut)
+                Pet:UnequipPet(id); unequipped = true; task.wait(0.4)
             end
         end
         
@@ -636,7 +641,6 @@ EmbeddedModules["feature/ui.lua"] = function()
         local activePets = Pet:GetAllActivePets() or {}
         for id, _ in pairs(activePets) do scan(id, nil) end
 
-        -- Webhook Check
         for _, p in ipairs(targetDoneBW) do
             if not m.WebhookNotifiedPets[p.ID] then
                 m.WebhookNotifiedPets[p.ID] = true
@@ -651,7 +655,6 @@ EmbeddedModules["feature/ui.lua"] = function()
         m.AutoGrowthState = m.AutoGrowthState or "IDLE"
         local newState = m.AutoGrowthState
 
-        -- LOGIKA PENGUNCI FASE (BATCH PROCESSING)
         if #targetUnderBW == 0 then
             newState = (n100 == 0) and "DONE" or "LEVELING_100"
         else
@@ -662,7 +665,6 @@ EmbeddedModules["feature/ui.lua"] = function()
                     newState = "LEVELING_50"
                 end
             elseif m.AutoGrowthState == "RESETTING" then
-                -- HYSTERESIS: Kunci di fase Reset sampai SEMUA pet level 50+ habis direset
                 if nReset == 0 then
                     newState = "LEVELING_50"
                 else
@@ -671,7 +673,6 @@ EmbeddedModules["feature/ui.lua"] = function()
             end
         end
 
-        -- EKSEKUSI PERGANTIAN FASE
         if newState ~= m.AutoGrowthState then
             m.AutoGrowthState = newState
             if newState ~= "DONE" then
@@ -707,10 +708,13 @@ EmbeddedModules["feature/ui.lua"] = function()
                 if isCore then continue
                 elseif match and valid then currentEquipped = currentEquipped + 1
                 else Pet:UnequipPet(id); unequipped = true; task.wait(0.4) end
+            else
+                -- BUG FIX: Tarik Paksa jika data pet terbaca nil (Nyangkut)
+                Pet:UnequipPet(id); unequipped = true; task.wait(0.4)
             end
         end
 
-        if unequipped then task.wait(1.5); activePets = Pet:GetAllActivePets() or {} end
+        if unequipped then task.wait(2); activePets = Pet:GetAllActivePets() or {} end
         for _, id in ipairs(core) do if not activePets[id] then Pet:EquipPet(id); activePets[id] = true; task.wait(0.4) end end
         if currentEquipped < maxTarget then
             local pool = (newState == "LEVELING_100") and targetDoneBW or targetUnderBW
@@ -743,6 +747,7 @@ EmbeddedModules["feature/ui.lua"] = function()
 
     return m
 end
+
 
 -- Module: quest/season_pass.lua
 EmbeddedModules["quest/season_pass.lua"] = function()
@@ -13337,7 +13342,7 @@ local configFolder = "EzHub/AfiHub"
 
 -- Initialize window
 local window = EzUI:CreateNew({
-    Title = "AfiHub 1.121.5",
+    Title = "AfiHub 1.121.6",
     Width = 700,
     Height = 400,
     Opacity = 0.9,
