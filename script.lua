@@ -289,7 +289,7 @@ EmbeddedModules["feature/ui.lua"] = function()
         m:CreateMiscTab()
 
         task.spawn(function()
-            task.wait(4) -- Waktu tunggu ekstra agar data game sinkron sebelum loop dimulai
+            task.wait(3) 
             while true do
                 if m.LabelTargetTotal then
                     m:UpdateGrowthDashboard()
@@ -333,19 +333,8 @@ EmbeddedModules["feature/ui.lua"] = function()
         })
 
         accordion:AddLabel("Konfigurasi Webhook ini akan digunakan untuk semua fitur script.")
-
-        accordion:AddTextBox({
-            Name = "Discord Webhook URL",
-            Default = "",
-            Placeholder = "https://discord.com/api/webhooks/...",
-            Flag = "GlobalWebhookUrl"
-        })
-
-        accordion:AddToggle({
-            Name = "Enable Global Notifications",
-            Default = false,
-            Flag = "GlobalWebhookToggle"
-        })
+        accordion:AddTextBox({ Name = "Discord Webhook URL", Default = "", Placeholder = "https://discord.com/api/webhooks/...", Flag = "GlobalWebhookUrl" })
+        accordion:AddToggle({ Name = "Enable Global Notifications", Default = false, Flag = "GlobalWebhookToggle" })
     end
 
     function m:UpdateGrowthDashboard()
@@ -376,16 +365,11 @@ EmbeddedModules["feature/ui.lua"] = function()
             
             processed[id] = true
             local match = false
-            for _, t in ipairs(targetPetTypes) do 
-                if d.Type == t or id == t then match = true; break end 
-            end
+            for _, t in ipairs(targetPetTypes) do if d.Type == t or id == t then match = true; break end end
 
             if match then
-                if (tonumber(d.BaseWeight) or 0) < targetWeight then
-                    targetUnderBW = targetUnderBW + 1
-                else
-                    targetDoneBW = targetDoneBW + 1
-                end
+                if (tonumber(d.BaseWeight) or 0) < targetWeight then targetUnderBW = targetUnderBW + 1
+                else targetDoneBW = targetDoneBW + 1 end
             end
         end
 
@@ -417,15 +401,7 @@ EmbeddedModules["feature/ui.lua"] = function()
                 timestamp = DateTime.now():ToIsoDate()
             }}
         }
-
-        pcall(function()
-            httpRequest({
-                Url = url,
-                Method = "POST",
-                Headers = {["Content-Type"] = "application/json"},
-                Body = HttpService:JSONEncode(data)
-            })
-        end)
+        pcall(function() httpRequest({ Url = url, Method = "POST", Headers = {["Content-Type"] = "application/json"}, Body = HttpService:JSONEncode(data) }) end)
     end
 
     function m:ScanAndGetFavorites()
@@ -452,29 +428,31 @@ EmbeddedModules["feature/ui.lua"] = function()
         return currentOptionsSet
     end
 
+    -- PENGECEKAN KETAT: Bersihkan Garden Sampai Benar-benar Kosong
     function m:ForceClearGarden()
         if not Pet then return end
         if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("⚙️ Status: 🧹 Membersihkan Garden...") end
-        local activePets = Pet:GetAllActivePets() or {}
-        local isCleared = false
-        for petID, _ in pairs(activePets) do
-            Pet:UnequipPet(petID)
-            isCleared = true
-            task.wait(0.2)
+        
+        local cleanAttempts = 0
+        while cleanAttempts < 10 do
+            local activePets = Pet:GetAllActivePets() or {}
+            local hasPet = false
+            
+            for petID, _ in pairs(activePets) do
+                Pet:UnequipPet(petID)
+                hasPet = true
+                task.wait(0.2)
+            end
+            
+            if not hasPet then break end -- Jika sudah bersih, hentikan loop
+            task.wait(2) -- Jeda 2 detik lalu cek ulang
+            cleanAttempts = cleanAttempts + 1
         end
-        if isCleared then task.wait(2) end -- Jeda lebih lama agar server terjamin bersih
     end
 
     function m:AddPetTeamsManagementSection(tab)
         local accordion = tab:AddAccordion({ Title = "Pet Teams Management", Icon = "🛠️", Expanded = false })
-        accordion:AddSelectBox({
-            Name = "Select Team",
-            Options = {"Loading..."},
-            MultiSelect = true,
-            Flag = "FeatureDeployTeam",
-            OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(m:ScanAndGetFavorites()) end end,
-            OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(m:ScanAndGetFavorites()) end end
-        })
+        accordion:AddSelectBox({ Name = "Select Team", Options = {"Loading..."}, MultiSelect = true, Flag = "FeatureDeployTeam", OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(m:ScanAndGetFavorites()) end end, OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(m:ScanAndGetFavorites()) end end })
         accordion:AddButton({
             Text = "Deploy Team 🚀",
             Callback = function()
@@ -489,63 +467,20 @@ EmbeddedModules["feature/ui.lua"] = function()
         local accordion = tab:AddAccordion({ Title = "Advanced Auto Leveling & Team", Icon = "⚡", Expanded = false })
         accordion:AddNumberBox({ Name = "Target Level", Default = 100, Flag = "FeatureAdvTargetLevel" })
         accordion:AddNumberBox({ Name = "Max Slots", Default = 1, Flag = "FeatureAdvMaxSlots" })
-        accordion:AddSelectBox({
-            Name = "Core Team",
-            Options = {"Loading..."},
-            MultiSelect = true,
-            Flag = "FeatureAdvCoreTeam",
-            OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(m:ScanAndGetFavorites()) end end,
-            OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(m:ScanAndGetFavorites()) end end
-        })
-        accordion:AddSelectBox({
-            Name = "Target Pets",
-            Options = {"Loading..."},
-            MultiSelect = true,
-            Flag = "FeatureAdvTargetPets",
-            OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(Pet:GetPetRegistry()) end end,
-            OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(Pet:GetPetRegistry()) end end
-        })
-        accordion:AddToggle({
-            Name = "Enable Auto Leveling",
-            Flag = "FeatureAdvLevelingToggle",
-            Callback = function(value) if not value then m:ForceClearGarden() end end
-        })
+        accordion:AddSelectBox({ Name = "Core Team", Options = {"Loading..."}, MultiSelect = true, Flag = "FeatureAdvCoreTeam", OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(m:ScanAndGetFavorites()) end end, OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(m:ScanAndGetFavorites()) end end })
+        accordion:AddSelectBox({ Name = "Target Pets", Options = {"Loading..."}, MultiSelect = true, Flag = "FeatureAdvTargetPets", OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(Pet:GetPetRegistry()) end end, OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(Pet:GetPetRegistry()) end end })
+        accordion:AddToggle({ Name = "Enable Auto Leveling", Flag = "FeatureAdvLevelingToggle", Callback = function(value) if not value then m:ForceClearGarden() end end })
     end
 
     function m:AddAutoGrowthSection(tab)
         local accordion = tab:AddAccordion({ Title = "Auto Growth (Multi-Stage)", Icon = "📈", Expanded = false })
-        
         accordion:AddLabel("--- 1. Konfigurasi ---")
         accordion:AddNumberBox({ Name = "Target BW (KG)", Default = 10.0, Decimals = 2, Flag = "FeatureGrowthTargetWeight" })
         accordion:AddNumberBox({ Name = "Max Slots", Default = 1, Flag = "FeatureGrowthMaxSlots" })
+        accordion:AddSelectBox({ Name = "Spesies Target", Options = {"Loading..."}, MultiSelect = true, Flag = "FeatureGrowthTargetPets", OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(Pet:GetPetRegistry()) end end, OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(Pet:GetPetRegistry()) end end })
+        accordion:AddSelectBox({ Name = "Tim 1 (Leveling)", Options = {"Loading..."}, MultiSelect = true, Flag = "FeatureGrowthTeam1", OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(m:ScanAndGetFavorites()) end end, OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(m:ScanAndGetFavorites()) end end })
+        accordion:AddSelectBox({ Name = "Tim 2 (Elephant)", Options = {"Loading..."}, MultiSelect = true, Flag = "FeatureGrowthTeam2", OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(m:ScanAndGetFavorites()) end end, OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(m:ScanAndGetFavorites()) end end })
         
-        accordion:AddSelectBox({
-            Name = "Spesies Target",
-            Options = {"Loading..."},
-            MultiSelect = true,
-            Flag = "FeatureGrowthTargetPets",
-            OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(Pet:GetPetRegistry()) end end,
-            OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(Pet:GetPetRegistry()) end end
-        })
-
-        accordion:AddSelectBox({
-            Name = "Tim 1 (Leveling)",
-            Options = {"Loading..."},
-            MultiSelect = true,
-            Flag = "FeatureGrowthTeam1",
-            OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(m:ScanAndGetFavorites()) end end,
-            OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(m:ScanAndGetFavorites()) end end
-        })
-
-        accordion:AddSelectBox({
-            Name = "Tim 2 (Elephant)",
-            Options = {"Loading..."},
-            MultiSelect = true,
-            Flag = "FeatureGrowthTeam2",
-            OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(m:ScanAndGetFavorites()) end end,
-            OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(m:ScanAndGetFavorites()) end end
-        })
-
         accordion:AddLabel("--- 2. Live Dashboard ---")
         m.LabelTeam1 = accordion:AddLabel("👥 Tim 1 (Leveling) : 0 Pet")
         m.LabelTeam2 = accordion:AddLabel("🐘 Tim 2 (Elephant) : 0 Pet")
@@ -554,15 +489,12 @@ EmbeddedModules["feature/ui.lua"] = function()
         m.GrowthStatusLabel = accordion:AddLabel("⚙️ Status: Menunggu...") 
 
         accordion:AddLabel("--- 3. Eksekusi ---")
-        accordion:AddToggle({
-            Name = "Enable Auto Growth",
-            Flag = "FeatureGrowthToggle",
-            Callback = function(value) 
-                if value then m.AutoGrowthState = "IDLE" else m:ForceClearGarden() end 
-            end
-        })
+        accordion:AddToggle({ Name = "Enable Auto Growth", Flag = "FeatureGrowthToggle", Callback = function(value) if value then m.AutoGrowthState = "IDLE" else m:ForceClearGarden() end end })
     end
 
+    -- ================================================================= --
+    -- LOGIKA EKSEKUSI (Strict Verification Loops)
+    -- ================================================================= --
     function m:ProcessAdvancedLeveling()
         if not Pet or Pet:GetCurrentPetTeam() ~= "core" then return end
         local coreTeam = Window:GetConfigValue("FeatureAdvCoreTeam") or {}
@@ -575,29 +507,56 @@ EmbeddedModules["feature/ui.lua"] = function()
         local targetLookup = {}
         for _, sel in ipairs(targetPets) do targetLookup[sel] = true end
         
-        local activePets = Pet:GetAllActivePets() or {}
-        local currentLeveling = 0
-        local unequipped = false
-
-        for id, _ in pairs(activePets) do
-            local d = Pet:GetPetDetail(id)
-            if d then
-                if coreLookup[id] then continue end
-                if (targetLookup[id] or targetLookup[d.Type]) and (tonumber(d.Age) or 0) < targetLevel then
-                    currentLeveling = currentLeveling + 1
+        -- FASE 1: UNEQUIP KETAT (Tunggu sampai yang tidak sesuai benar-benar ditarik)
+        local cleanAttempts = 0
+        while cleanAttempts < 5 do
+            local activePets = Pet:GetAllActivePets() or {}
+            local unequipped = false
+            for id, _ in pairs(activePets) do
+                local d = Pet:GetPetDetail(id)
+                if d then
+                    if coreLookup[id] then continue end
+                    if (targetLookup[id] or targetLookup[d.Type]) and (tonumber(d.Age) or 0) < targetLevel then
+                        -- Ini tumbal sah, biarkan
+                    else
+                        Pet:UnequipPet(id); unequipped = true; task.wait(0.2)
+                    end
                 else
-                    Pet:UnequipPet(id); unequipped = true; task.wait(0.4)
+                    Pet:UnequipPet(id); unequipped = true; task.wait(0.2)
                 end
-            else
-                -- BUG FIX: Tarik Paksa jika data pet terbaca nil (Nyangkut)
-                Pet:UnequipPet(id); unequipped = true; task.wait(0.4)
             end
+            if not unequipped then break end
+            task.wait(2)
+            cleanAttempts = cleanAttempts + 1
         end
         
-        if unequipped then task.wait(1.5); activePets = Pet:GetAllActivePets() or {} end
-        for _, id in ipairs(coreTeam) do if not activePets[id] then Pet:EquipPet(id); activePets[id] = true; task.wait(0.4) end end
+        -- FASE 2: EQUIP CORE TEAM KETAT (Tunggu sampai lengkap)
+        local coreAttempts = 0
+        while coreAttempts < 5 do
+            local activePets = Pet:GetAllActivePets() or {}
+            local missing = false
+            for _, id in ipairs(coreTeam) do 
+                if not activePets[id] then 
+                    Pet:EquipPet(id); missing = true; task.wait(0.2) 
+                end 
+            end
+            if not missing then break end
+            task.wait(2)
+            coreAttempts = coreAttempts + 1
+        end
         
-        if currentLeveling < maxTarget then
+        -- FASE 3: EQUIP TUMBAL KETAT
+        local tumbalAttempts = 0
+        while tumbalAttempts < 5 do
+            local activePets = Pet:GetAllActivePets() or {}
+            local currentLeveling = 0
+            for id, _ in pairs(activePets) do
+                if not coreLookup[id] then currentLeveling = currentLeveling + 1 end
+            end
+            
+            if currentLeveling >= maxTarget then break end
+            
+            local equippedAny = false
             local slots = maxTarget - currentLeveling
             local count = 0
             for _, tool in pairs(Pet:GetAllOwnedPets()) do
@@ -606,10 +565,14 @@ EmbeddedModules["feature/ui.lua"] = function()
                 local d = Pet:GetPetDetail(id)
                 if id and not activePets[id] and not tool:GetAttribute("d") and not m.FavoriteMemory[id] and d and (tonumber(d.Age) or 0) < targetLevel then
                     if targetLookup[id] or targetLookup[d.Type] then
-                        Pet:EquipPet(id); activePets[id] = true; count = count + 1; task.wait(0.4)
+                        Pet:EquipPet(id); equippedAny = true; count = count + 1; task.wait(0.2)
                     end
                 end
             end
+            
+            if not equippedAny then break end -- Mentok tidak ada tumbal di tas
+            task.wait(2)
+            tumbalAttempts = tumbalAttempts + 1
         end
     end
 
@@ -659,26 +622,15 @@ EmbeddedModules["feature/ui.lua"] = function()
             newState = (n100 == 0) and "DONE" or "LEVELING_100"
         else
             if m.AutoGrowthState == "IDLE" or m.AutoGrowthState == "LEVELING_50" or m.AutoGrowthState == "LEVELING_100" or m.AutoGrowthState == "DONE" then
-                if n50 == 0 and nReset > 0 then
-                    newState = "RESETTING"
-                else
-                    newState = "LEVELING_50"
-                end
+                if n50 == 0 and nReset > 0 then newState = "RESETTING" else newState = "LEVELING_50" end
             elseif m.AutoGrowthState == "RESETTING" then
-                if nReset == 0 then
-                    newState = "LEVELING_50"
-                else
-                    newState = "RESETTING"
-                end
+                if nReset == 0 then newState = "LEVELING_50" else newState = "RESETTING" end
             end
         end
 
         if newState ~= m.AutoGrowthState then
             m.AutoGrowthState = newState
-            if newState ~= "DONE" then
-                m:ForceClearGarden()
-                return 
-            end
+            if newState ~= "DONE" then m:ForceClearGarden(); return end
         end
 
         if m.GrowthStatusLabel then m.GrowthStatusLabel:SetText("⚙️ Status: " .. newState) end
@@ -688,66 +640,94 @@ EmbeddedModules["feature/ui.lua"] = function()
         local coreLookup = {}
         for _, id in ipairs(core) do coreLookup[id] = true end
 
-        local currentEquipped = 0
-        local unequipped = false
-        for id, _ in pairs(activePets) do
-            local d = Pet:GetPetDetail(id)
-            if d then
-                local isCore = coreLookup[id]
-                local valid = false
-                local age = tonumber(d.Age) or 0
-                local bw = tonumber(d.BaseWeight) or 0
-                
-                if newState == "LEVELING_50" then valid = (bw < targetWeight and age < 50)
-                elseif newState == "RESETTING" then valid = (bw < targetWeight and age >= 50)
-                elseif newState == "LEVELING_100" then valid = (bw >= targetWeight and age < 100) end
-                
-                local match = false
-                for _, t in ipairs(targetPetTypes) do if d.Type == t or id == t then match = true; break end end
+        -- FASE 1: UNEQUIP KETAT
+        local cleanAttempts = 0
+        while cleanAttempts < 5 do
+            local currActive = Pet:GetAllActivePets() or {}
+            local unequipped = false
+            for id, _ in pairs(currActive) do
+                local d = Pet:GetPetDetail(id)
+                if d then
+                    if coreLookup[id] then continue end
+                    local valid = false
+                    local age = tonumber(d.Age) or 0
+                    local bw = tonumber(d.BaseWeight) or 0
+                    
+                    if newState == "LEVELING_50" then valid = (bw < targetWeight and age < 50)
+                    elseif newState == "RESETTING" then valid = (bw < targetWeight and age >= 50)
+                    elseif newState == "LEVELING_100" then valid = (bw >= targetWeight and age < 100) end
+                    
+                    local match = false
+                    for _, t in ipairs(targetPetTypes) do if d.Type == t or id == t then match = true; break end end
 
-                if isCore then continue
-                elseif match and valid then currentEquipped = currentEquipped + 1
-                else Pet:UnequipPet(id); unequipped = true; task.wait(0.4) end
-            else
-                -- BUG FIX: Tarik Paksa jika data pet terbaca nil (Nyangkut)
-                Pet:UnequipPet(id); unequipped = true; task.wait(0.4)
+                    if match and valid then
+                        -- Sah, biarkan
+                    else 
+                        Pet:UnequipPet(id); unequipped = true; task.wait(0.2) 
+                    end
+                else
+                    Pet:UnequipPet(id); unequipped = true; task.wait(0.2)
+                end
             end
+            if not unequipped then break end
+            task.wait(2)
+            cleanAttempts = cleanAttempts + 1
         end
 
-        if unequipped then task.wait(2); activePets = Pet:GetAllActivePets() or {} end
-        for _, id in ipairs(core) do if not activePets[id] then Pet:EquipPet(id); activePets[id] = true; task.wait(0.4) end end
-        if currentEquipped < maxTarget then
+        -- FASE 2: EQUIP CORE KETAT
+        local coreAttempts = 0
+        while coreAttempts < 5 do
+            local currActive = Pet:GetAllActivePets() or {}
+            local missing = false
+            for _, id in ipairs(core) do 
+                if not currActive[id] then Pet:EquipPet(id); missing = true; task.wait(0.2) end 
+            end
+            if not missing then break end
+            task.wait(2)
+            coreAttempts = coreAttempts + 1
+        end
+        
+        -- FASE 3: EQUIP TUMBAL KETAT
+        local tumbalAttempts = 0
+        while tumbalAttempts < 5 do
+            local currActive = Pet:GetAllActivePets() or {}
+            local currentEquipped = 0
+            for id, _ in pairs(currActive) do
+                if not coreLookup[id] then currentEquipped = currentEquipped + 1 end
+            end
+            
+            if currentEquipped >= maxTarget then break end
+            
             local pool = (newState == "LEVELING_100") and targetDoneBW or targetUnderBW
             local slots = maxTarget - currentEquipped
             local count = 0
+            local equippedAny = false
+            
             for _, p in ipairs(pool) do
                 if count >= slots then break end
-                if activePets[p.ID] then continue end
+                if currActive[p.ID] then continue end
                 local should = false
                 local age = tonumber(p.Age) or 0
                 if newState == "LEVELING_50" and age < 50 then should = true
                 elseif newState == "RESETTING" and age >= 50 then should = true
                 elseif newState == "LEVELING_100" and age < 100 then should = true end
-                if should then Pet:EquipPet(p.ID); activePets[p.ID] = true; count = count + 1; task.wait(0.4) end
+                
+                if should then Pet:EquipPet(p.ID); equippedAny = true; count = count + 1; task.wait(0.2) end
             end
+            
+            if not equippedAny then break end
+            task.wait(2)
+            tumbalAttempts = tumbalAttempts + 1
         end
     end
 
     function m:AddTestFavoriteSection(tab)
         local accordion = tab:AddAccordion({ Title = "Favorite Detection Test", Icon = "🔍", Expanded = false })
-        accordion:AddSelectBox({
-            Name = "Detected Favorites",
-            Options = {"Loading..."},
-            MultiSelect = true,
-            Flag = "TestFavoritePets",
-            OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(m:ScanAndGetFavorites()) end end,
-            OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(m:ScanAndGetFavorites()) end end
-        })
+        accordion:AddSelectBox({ Name = "Detected Favorites", Options = {"Loading..."}, MultiSelect = true, Flag = "TestFavoritePets", OnInit = function(api, optionsData) if Pet then optionsData.updateOptions(m:ScanAndGetFavorites()) end end, OnDropdownOpen = function(currentOptions, updateOptions) if Pet then updateOptions(m:ScanAndGetFavorites()) end end })
     end
 
     return m
 end
-
 
 -- Module: quest/season_pass.lua
 EmbeddedModules["quest/season_pass.lua"] = function()
